@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	protocol "github.com/ibuilding-x/driver-box/v2/pkg/iec104"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	protocol "github.com/orglibs/driver-box/v2/pkg/iec104"
 	"github.com/orglibs/go-iecp5/asdu"
 )
 

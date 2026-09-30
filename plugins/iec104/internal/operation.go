@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
-	protocol "github.com/ibuilding-x/driver-box/v2/pkg/iec104"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/pkg/config"
+	protocol "github.com/orglibs/driver-box/v2/pkg/iec104"
 	"github.com/orglibs/go-iecp5/asdu"
 )
 

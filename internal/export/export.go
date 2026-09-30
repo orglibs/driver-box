@@ -1,9 +1,9 @@
 package export
 
 import (
-	"github.com/ibuilding-x/driver-box/v2/driverbox/export"
-	"github.com/ibuilding-x/driver-box/v2/internal/logger"
-	"github.com/ibuilding-x/driver-box/v2/pkg/event"
+	"github.com/orglibs/driver-box/v2/driverbox/export"
+	"github.com/orglibs/driver-box/v2/internal/logger"
+	"github.com/orglibs/driver-box/v2/pkg/event"
 	"go.uber.org/zap"
 )
 

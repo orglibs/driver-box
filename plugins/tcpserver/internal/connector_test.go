@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/internal/logger"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/internal/logger"
 )
 
 func init() {

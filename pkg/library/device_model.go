@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
-	"github.com/ibuilding-x/driver-box/v2/pkg/fileutil"
+	"github.com/orglibs/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/pkg/fileutil"
 )
 
 type DeviceModel struct {

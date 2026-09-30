@@ -25,7 +25,7 @@ description: IEC 60870-5-104 主站，多设备地址偏移、数据采集、遥
 `plugins.EnableAll()` 已注册 IEC104；也可单独启用：
 
 ```go
-import "github.com/ibuilding-x/driver-box/v2/plugins/iec104"
+import "github.com/orglibs/driver-box/v2/plugins/iec104"
 
 // 在 driverbox.Start() 前调用。
 iec104.EnablePlugin()
@@ -354,8 +354,8 @@ STARTDT 请求的字段示例：
 
 ```go
 import (
-    "github.com/ibuilding-x/driver-box/v2/driverbox"
-    "github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
+    "github.com/orglibs/driver-box/v2/driverbox"
+    "github.com/orglibs/driver-box/v2/driverbox/plugin"
 )
 
 // 读 cabinet_a；响应异步更新影子，使用 CA=1、遥测 IOA=4002。

@@ -49,7 +49,7 @@ driver-box 定义了以下内置事件类型:
 在任何地方都可以通过 `driverbox.TriggerEvents()` 触发事件:
 
 ```go
-import "github.com/ibuilding-x/driver-box/pkg/event"
+import "github.com/orglibs/driver-box/pkg/event"
 
 // 设备上线事件
 driverbox.TriggerEvents(event.DeviceAdded, "device-001", nil)
@@ -83,9 +83,9 @@ Export 模块通过实现 `OnEvent()` 方法订阅和处理事件:
 package myexport
 
 import (
-    "github.com/ibuilding-x/driver-box/driverbox/export"
-    "github.com/ibuilding-x/driver-box/driverbox/plugin"
-    "github.com/ibuilding-x/driver-box/pkg/event"
+    "github.com/orglibs/driver-box/driverbox/export"
+    "github.com/orglibs/driver-box/driverbox/plugin"
+    "github.com/orglibs/driver-box/pkg/event"
     "go.uber.org/zap"
 )
 

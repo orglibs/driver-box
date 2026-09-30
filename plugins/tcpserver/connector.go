@@ -1,7 +1,7 @@
 package tcpserver
 
 import (
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
 )
 
 // Connector 是 TCP Server 插件在 plugin.Connector 基础上提供的可选扩展接口。

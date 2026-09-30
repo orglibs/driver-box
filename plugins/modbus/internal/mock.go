@@ -5,10 +5,10 @@ import (
 	"errors"
 	"path/filepath"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
-	"github.com/ibuilding-x/driver-box/v2/pkg/fileutil"
-	"github.com/ibuilding-x/driver-box/v2/pkg/luautil"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/pkg/fileutil"
+	"github.com/orglibs/driver-box/v2/pkg/luautil"
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
 )

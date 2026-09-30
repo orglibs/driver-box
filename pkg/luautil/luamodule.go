@@ -1,11 +1,11 @@
 package luautil
 
 import (
-	"github.com/ibuilding-x/driver-box/v2/internal/cache"
-	"github.com/ibuilding-x/driver-box/v2/internal/logger"
-	"github.com/ibuilding-x/driver-box/v2/internal/shadow"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
-	"github.com/ibuilding-x/driver-box/v2/pkg/convutil"
+	"github.com/orglibs/driver-box/v2/internal/cache"
+	"github.com/orglibs/driver-box/v2/internal/logger"
+	"github.com/orglibs/driver-box/v2/internal/shadow"
+	"github.com/orglibs/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/pkg/convutil"
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
 )

@@ -1,8 +1,8 @@
 package opcua
 
 import (
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/plugins/opcua/internal"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/plugins/opcua/internal"
 )
 
 func EnablePlugin() {

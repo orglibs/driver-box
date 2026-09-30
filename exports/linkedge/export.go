@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/exports/linkedge/model"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
-	"github.com/ibuilding-x/driver-box/v2/pkg/event"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/exports/linkedge/model"
+	"github.com/orglibs/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/pkg/event"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )

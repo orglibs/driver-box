@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/driverbox"
 	"github.com/gopcua/opcua"
 	"github.com/gopcua/opcua/ua"
 	"go.uber.org/zap"

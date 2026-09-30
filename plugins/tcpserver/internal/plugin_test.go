@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/pkg/config"
 )
 
 // newTestPlugin 创建测试用的插件

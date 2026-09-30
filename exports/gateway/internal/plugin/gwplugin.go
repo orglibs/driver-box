@@ -3,10 +3,10 @@ package plugin
 import (
 	"errors"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
-	"github.com/ibuilding-x/driver-box/v2/pkg/convutil"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/pkg/convutil"
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
 )

@@ -1,6 +1,6 @@
 package plugin
 
-import "github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
+import "github.com/orglibs/driver-box/v2/driverbox/plugin"
 
 const MirrorConnectionKey = "mirror_connection_key"
 

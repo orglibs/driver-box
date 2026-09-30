@@ -6,12 +6,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
-	"github.com/ibuilding-x/driver-box/v2/pkg/convutil"
-	"github.com/ibuilding-x/driver-box/v2/pkg/crontab"
-	"github.com/ibuilding-x/driver-box/v2/pkg/luautil"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/pkg/convutil"
+	"github.com/orglibs/driver-box/v2/pkg/crontab"
+	"github.com/orglibs/driver-box/v2/pkg/luautil"
 	"github.com/simonvetter/modbus"
 	"go.uber.org/zap"
 )

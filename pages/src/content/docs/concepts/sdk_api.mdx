@@ -18,9 +18,9 @@ driver-box 提供了完整的 Go SDK API,支持设备管理、数据读写、配
 ```go title="main.go"
 package main
 import (
-    "github.com/ibuilding-x/driver-box/driverbox"
-    "github.com/ibuilding-x/driver-box/plugins"
-    "github.com/ibuilding-x/driver-box/exports"
+    "github.com/orglibs/driver-box/driverbox"
+    "github.com/orglibs/driver-box/plugins"
+    "github.com/orglibs/driver-box/exports"
 )
 func main() {
     // 第一步: 启用内置Plugin
@@ -55,25 +55,25 @@ func main() {
 
 | Plugin名称 | 导入路径 | 启用方法 |
 |---------|---------|---------|
-| Modbus | `github.com/ibuilding-x/driver-box/plugins/modbus` | `modbus.EnablePlugin()` |
-| IEC104 主站 | `github.com/ibuilding-x/driver-box/v2/plugins/iec104` | `iec104.EnablePlugin()` |
-| BACnet | `github.com/ibuilding-x/driver-box/plugins/bacnet` | `bacnet.EnablePlugin()` |
-| HTTP Server | `github.com/ibuilding-x/driver-box/plugins/httpserver` | `httpserver.EnablePlugin()` |
-| HTTP Client | `github.com/ibuilding-x/driver-box/plugins/httpclient` | `httpclient.EnablePlugin()` |
-| WebSocket | `github.com/ibuilding-x/driver-box/plugins/websocket` | `websocket.EnablePlugin()` |
-| TCP Server | `github.com/ibuilding-x/driver-box/plugins/tcpserver` | `tcpserver.EnablePlugin()` |
-| MQTT | `github.com/ibuilding-x/driver-box/plugins/mqtt` | `mqtt.EnablePlugin()` |
-| Mirror | `github.com/ibuilding-x/driver-box/plugins/mirror` | `mirror.EnablePlugin()` |
-| DLT645 | `github.com/ibuilding-x/driver-box/plugins/dlt645` | `dlt645.EnablePlugin()` |
-| Gateway | `github.com/ibuilding-x/driver-box/plugins/gateway` | `gateway.EnablePlugin()` |
+| Modbus | `github.com/orglibs/driver-box/plugins/modbus` | `modbus.EnablePlugin()` |
+| IEC104 主站 | `github.com/orglibs/driver-box/v2/plugins/iec104` | `iec104.EnablePlugin()` |
+| BACnet | `github.com/orglibs/driver-box/plugins/bacnet` | `bacnet.EnablePlugin()` |
+| HTTP Server | `github.com/orglibs/driver-box/plugins/httpserver` | `httpserver.EnablePlugin()` |
+| HTTP Client | `github.com/orglibs/driver-box/plugins/httpclient` | `httpclient.EnablePlugin()` |
+| WebSocket | `github.com/orglibs/driver-box/plugins/websocket` | `websocket.EnablePlugin()` |
+| TCP Server | `github.com/orglibs/driver-box/plugins/tcpserver` | `tcpserver.EnablePlugin()` |
+| MQTT | `github.com/orglibs/driver-box/plugins/mqtt` | `mqtt.EnablePlugin()` |
+| Mirror | `github.com/orglibs/driver-box/plugins/mirror` | `mirror.EnablePlugin()` |
+| DLT645 | `github.com/orglibs/driver-box/plugins/dlt645` | `dlt645.EnablePlugin()` |
+| Gateway | `github.com/orglibs/driver-box/plugins/gateway` | `gateway.EnablePlugin()` |
 
 **使用示例:**
 
 ```go title="main.go"
 import (
-    "github.com/ibuilding-x/driver-box/driverbox"
-    "github.com/ibuilding-x/driver-box/plugins/modbus"
-    "github.com/ibuilding-x/driver-box/plugins/bacnet"
+    "github.com/orglibs/driver-box/driverbox"
+    "github.com/orglibs/driver-box/plugins/modbus"
+    "github.com/orglibs/driver-box/plugins/bacnet"
 )
 func main() {
     // 只启用 modbus Plugin
@@ -95,7 +95,7 @@ func main() {
 
 ```go title="main.go"
 import (
-    "github.com/ibuilding-x/driver-box/driverbox"
+    "github.com/orglibs/driver-box/driverbox"
     myplugin "github.com/your-org/my-driver-box-plugin"
 )
 func main() {
@@ -132,19 +132,19 @@ driverbox.ReloadPlugins()
 
 | Export模块名称 | 导入路径 | 启用方法 |
 |------------|---------|---------|
-| LinkEdge | `github.com/ibuilding-x/driver-box/exports/linkedge` | `linkedge.EnableExport()` |
-| Mirror | `github.com/ibuilding-x/driver-box/exports/mirror` | `mirror.EnableExport()` |
-| Discover | `github.com/ibuilding-x/driver-box/exports/discover` | `discover.EnableExport()` |
-| Gateway | `github.com/ibuilding-x/driver-box/exports/gateway` | `gateway.EnableExport()` |
+| LinkEdge | `github.com/orglibs/driver-box/exports/linkedge` | `linkedge.EnableExport()` |
+| Mirror | `github.com/orglibs/driver-box/exports/mirror` | `mirror.EnableExport()` |
+| Discover | `github.com/orglibs/driver-box/exports/discover` | `discover.EnableExport()` |
+| Gateway | `github.com/orglibs/driver-box/exports/gateway` | `gateway.EnableExport()` |
 
 **使用示例:**
 
 ```go
 import (
-    "github.com/ibuilding-x/driver-box/driverbox"
-    "github.com/ibuilding-x/driver-box/plugins/modbus"
-    "github.com/ibuilding-x/driver-box/exports/gateway"
-    "github.com/ibuilding-x/driver-box/exports/linkedge"
+    "github.com/orglibs/driver-box/driverbox"
+    "github.com/orglibs/driver-box/plugins/modbus"
+    "github.com/orglibs/driver-box/exports/gateway"
+    "github.com/orglibs/driver-box/exports/linkedge"
 )
 func main() {
     // 启用Plugin
@@ -168,7 +168,7 @@ func main() {
 
 ```go
 import (
-    "github.com/ibuilding-x/driver-box/driverbox"
+    "github.com/orglibs/driver-box/driverbox"
     myexport "github.com/your-org/my-driver-box-export"
 )
 func main() {
@@ -244,7 +244,7 @@ driver-box 的 Go SDK 主要包含以下模块:
 主动读取指定设备的点位值。
 
 ```go
-import "github.com/ibuilding-x/driver-box/driverbox"
+import "github.com/orglibs/driver-box/driverbox"
 
 // 读取单个点位
 err := driverbox.ReadPoint("device-001", "temperature")
@@ -266,8 +266,8 @@ if err != nil {
 向指定设备的点位写入控制值,支持单个写入和批量写入。
 
 ```go
-import "github.com/ibuilding-x/driver-box/driverbox"
-import "github.com/ibuilding-x/driver-box/driverbox/plugin"
+import "github.com/orglibs/driver-box/driverbox"
+import "github.com/orglibs/driver-box/driverbox/plugin"
 
 // 写入单个点位
 err := driverbox.WritePoint("device-001", plugin.PointData{
@@ -300,8 +300,8 @@ if err != nil {
 ### 批量读取设备点位
 
 ```go
-import "github.com/ibuilding-x/driver-box/driverbox"
-import "github.com/ibuilding-x/driver-box/driverbox/plugin"
+import "github.com/orglibs/driver-box/driverbox"
+import "github.com/orglibs/driver-box/driverbox/plugin"
 
 // 批量读取点位
 points := []plugin.PointData{

@@ -3,8 +3,8 @@ package cache
 import (
 	"time"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/pkg/config"
 )
 
 type cachePlugin struct {

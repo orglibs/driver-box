@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
 )
 
 // Decoder used

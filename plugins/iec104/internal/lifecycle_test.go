@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
 )
 
 func TestDisconnectMarksEveryDeviceOfflineAndReconnectReports(t *testing.T) {

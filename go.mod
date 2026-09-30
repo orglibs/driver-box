@@ -1,4 +1,4 @@
-module github.com/ibuilding-x/driver-box/v2
+module github.com/orglibs/driver-box/v2
 
 go 1.23.0
 
@@ -15,6 +15,7 @@ require (
 	github.com/i2y/langchaingo-mcp-adapter v0.0.0-20250623114610-a01671e1c8df
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mark3labs/mcp-go v0.36.0
+	github.com/orglibs/go-iecp5 v1.7.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/robinson/gos7 v0.0.0-20241205073040-7ea1d6fb9d20
@@ -27,7 +28,6 @@ require (
 	github.com/themeyic/timing v1.1.2
 	github.com/tmc/langchaingo v0.1.13
 	github.com/yuin/gopher-lua v1.1.1
-	github.com/orglibs/go-iecp5 v1.7.1
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20250718183923-645b1fa84792
 	golang.org/x/text v0.27.0

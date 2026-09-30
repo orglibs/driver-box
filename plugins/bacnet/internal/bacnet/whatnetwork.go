@@ -3,9 +3,9 @@ package bacnet
 import (
 	"fmt"
 
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/ndpu"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/encoding"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/ndpu"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/encoding"
 )
 
 /*

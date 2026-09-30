@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ibuilding-x/driver-box/v2/pkg/event"
+	"github.com/orglibs/driver-box/v2/pkg/event"
 )
 
 func TestMergeDeviceData(t *testing.T) {

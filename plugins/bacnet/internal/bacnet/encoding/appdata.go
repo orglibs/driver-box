@@ -3,8 +3,8 @@ package encoding
 import (
 	"fmt"
 
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/null"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/null"
 )
 
 const (

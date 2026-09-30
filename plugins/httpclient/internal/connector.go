@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/pkg/crontab"
-	"github.com/ibuilding-x/driver-box/v2/pkg/library"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/pkg/crontab"
+	"github.com/orglibs/driver-box/v2/pkg/library"
 	"go.uber.org/zap"
 )
 

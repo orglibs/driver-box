@@ -3,7 +3,7 @@ package internal
 import (
 	"fmt"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/driverbox"
 	"github.com/robinson/gos7"
 	"go.uber.org/zap"
 )

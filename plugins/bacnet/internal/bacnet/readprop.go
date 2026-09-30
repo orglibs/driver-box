@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/encoding"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/encoding"
 )
 
 // ReadProperty reads a single property from a single object in the given device.

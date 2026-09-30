@@ -4,10 +4,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/internal/testutil/exporttest"
-	"github.com/ibuilding-x/driver-box/v2/pkg/event"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/internal/testutil/exporttest"
+	"github.com/orglibs/driver-box/v2/pkg/event"
 )
 
 // No protocol methods are needed when loading the fixture configuration.

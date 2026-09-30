@@ -11,13 +11,13 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/internal/cache"
-	exports "github.com/ibuilding-x/driver-box/v2/internal/export"
-	"github.com/ibuilding-x/driver-box/v2/internal/logger"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
-	"github.com/ibuilding-x/driver-box/v2/pkg/event"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/internal/cache"
+	exports "github.com/orglibs/driver-box/v2/internal/export"
+	"github.com/orglibs/driver-box/v2/internal/logger"
+	"github.com/orglibs/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/pkg/event"
 	"go.uber.org/zap"
 )
 

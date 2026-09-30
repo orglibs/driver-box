@@ -9,11 +9,11 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/internal/core"
-	"github.com/ibuilding-x/driver-box/v2/internal/export/base/restful"
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
-	"github.com/ibuilding-x/driver-box/v2/pkg/event"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/internal/core"
+	"github.com/orglibs/driver-box/v2/internal/export/base/restful"
+	"github.com/orglibs/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/pkg/event"
 	"github.com/julienschmidt/httprouter"
 )
 

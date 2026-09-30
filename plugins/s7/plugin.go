@@ -1,8 +1,8 @@
 package s7
 
 import (
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/plugins/s7/internal"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/plugins/s7/internal"
 )
 
 func EnablePlugin() {

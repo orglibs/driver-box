@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	projectlog "github.com/ibuilding-x/driver-box/v2/internal/logger"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	projectlog "github.com/orglibs/driver-box/v2/internal/logger"
 	"github.com/orglibs/go-iecp5/cs104"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"

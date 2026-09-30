@@ -1,6 +1,6 @@
 package plugin
 
-import "github.com/ibuilding-x/driver-box/v2/pkg/event"
+import "github.com/orglibs/driver-box/v2/pkg/event"
 
 // MergeDeviceData 合并一次读取或消息中的同设备、同导出类型数据。
 // 保留设备首次出现顺序及各设备的点位、事件顺序，忽略无点位且无事件的数据。

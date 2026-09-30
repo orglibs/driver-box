@@ -4,7 +4,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Documentation](https://img.shields.io/badge/docs-latest-green.svg)](https://ibuilding-x.github.io/driver-box/)
+[![Documentation](https://img.shields.io/badge/docs-latest-green.svg)](https://orglibs.github.io/driver-box/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ibuilding-X/driver-box)
 
 一款支持泛化协议接入的轻量级边缘网关框架，通过插件化和Lua脚本实现灵活的设备接入能力。
@@ -151,7 +151,7 @@ driver-box/
 #### 1. 下载源码
 
 ```bash
-git clone https://github.com/ibuilding-X/driver-box.git
+git clone https://github.com/orglibs/driver-box.git
 cd driver-box
 ```
 
@@ -247,9 +247,9 @@ package main
 import (
 	"os"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/exports"
-	"github.com/ibuilding-x/driver-box/v2/plugins"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/exports"
+	"github.com/orglibs/driver-box/v2/plugins"
 )
 
 func main() {
@@ -268,9 +268,9 @@ func main() {
 
 完整的二次开发文档请参考：
 
-- **[Plugin开发指南](https://ibuilding-x.github.io/driver-box/plugins/development)** - 详细的 Plugin 和 Connector 接口实现指南
+- **[Plugin开发指南](https://orglibs.github.io/driver-box/plugins/development)** - 详细的 Plugin 和 Connector 接口实现指南
 - **[IEC104 主站接入与扩展](pages/src/content/docs/plugins/iec104.mdx)** - 多设备点表复用、配置示例、控制确认及后续从站 export 设计
-- **[Export开发指南](https://ibuilding-x.github.io/driver-box/exports/development)** - 数据导出功能开发教程
+- **[Export开发指南](https://orglibs.github.io/driver-box/exports/development)** - 数据导出功能开发教程
 
 ---
 
@@ -323,7 +323,7 @@ driver-box 适用于多种物联网场景：
 
 ### 获取帮助
 
-- 📚 **[官方文档](https://ibuilding-x.github.io/driver-box/)** - 完整的使用文档和 API 参考
+- 📚 **[官方文档](https://orglibs.github.io/driver-box/)** - 完整的使用文档和 API 参考
 - 🐛 **[Issue 反馈](https://gitee.com/ibuilding-X/driver-box/issues)** - 报告 Bug 或提交功能请求
 - 💬 **[讨论区](https://gitee.com/ibuilding-X/driver-box/discussions)** - 交流使用经验和最佳实践
 - 🔍 **[DeepWiki](https://deepwiki.com/ibuilding-X/driver-box)** - AI 驱动的知识库问答

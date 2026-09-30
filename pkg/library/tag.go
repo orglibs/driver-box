@@ -6,7 +6,7 @@ import (
 	"path"
 	"sync"
 
-	"github.com/ibuilding-x/driver-box/v2/pkg/config"
+	"github.com/orglibs/driver-box/v2/pkg/config"
 	"golang.org/x/exp/slices"
 )
 

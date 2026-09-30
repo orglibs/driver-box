@@ -3,11 +3,11 @@ package network
 import (
 	"errors"
 
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/priority"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/units"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/helpers/data"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/priority"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/units"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/helpers/data"
 )
 
 type Point struct {

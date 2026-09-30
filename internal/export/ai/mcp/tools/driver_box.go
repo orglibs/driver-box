@@ -3,8 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/internal/core"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/internal/core"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 

@@ -1,8 +1,8 @@
 package websocket
 
 import (
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/plugins/websocket/internal"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/plugins/websocket/internal"
 )
 
 func EnablePlugin() {

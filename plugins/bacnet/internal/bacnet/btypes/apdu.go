@@ -3,7 +3,7 @@ package btypes
 import (
 	"fmt"
 
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/bacerr"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes/bacerr"
 )
 
 /*

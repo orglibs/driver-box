@@ -1,8 +1,8 @@
 package bacnet
 
 import (
-	"github.com/ibuilding-x/driver-box/v2/driverbox"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal"
+	"github.com/orglibs/driver-box/v2/driverbox"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal"
 )
 
 func EnablePlugin() {

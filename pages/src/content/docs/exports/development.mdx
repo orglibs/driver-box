@@ -86,7 +86,7 @@ driver-box的export需要实现标准的生命周期接口：
 package your_export
 
 import (
-	"github.com/ibuilding-x/driver-box/exports/your_export/internal"
+	"github.com/orglibs/driver-box/exports/your_export/internal"
 )
 
 // EnableExport 启用Export（必须导出此函数）
@@ -106,11 +106,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/driverbox"
-	"github.com/ibuilding-x/driver-box/internal/export/base"
-	"github.com/ibuilding-x/driver-box/internal/logger"
-	"github.com/ibuilding-x/driverbox/pkg/config"
-	"github.com/ibuilding-x/driver-box/pkg/event"
+	"github.com/orglibs/driver-box/driverbox"
+	"github.com/orglibs/driver-box/internal/export/base"
+	"github.com/orglibs/driver-box/internal/logger"
+	"github.com/orglibs/driver-box/pkg/config"
+	"github.com/orglibs/driver-box/pkg/event"
 	"go.uber.org/zap"
 )
 
@@ -280,7 +280,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/pkg/config"
+	"github.com/orglibs/driver-box/pkg/config"
 	"go.uber.org/zap"
 )
 
@@ -405,8 +405,8 @@ package internal
 import (
 	"time"
 
-	"github.com/ibuilding-x/driver-box/driverbox"
-	"github.com/ibuilding-x/driver-box/pkg/config"
+	"github.com/orglibs/driver-box/driverbox"
+	"github.com/orglibs/driver-box/pkg/config"
 )
 
 // DataProcessor 数据处理器
@@ -508,7 +508,7 @@ package internal
 import (
 	"time"
 
-	"github.com/ibuilding-x/driver-box/pkg/config"
+	"github.com/orglibs/driver-box/pkg/config"
 )
 
 // ExportConfig 导出配置
@@ -651,8 +651,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ibuilding-x/driver-box/driverbox"
-	"github.com/ibuilding-x/driver-box/exports/your_export/internal"
+	"github.com/orglibs/driver-box/driverbox"
+	"github.com/orglibs/driver-box/exports/your_export/internal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

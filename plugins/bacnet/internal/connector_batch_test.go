@@ -4,9 +4,9 @@ import (
 	"math"
 	"testing"
 
-	"github.com/ibuilding-x/driver-box/v2/driverbox/plugin"
-	"github.com/ibuilding-x/driver-box/v2/internal/testutil/exporttest"
-	"github.com/ibuilding-x/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
+	"github.com/orglibs/driver-box/v2/driverbox/plugin"
+	"github.com/orglibs/driver-box/v2/internal/testutil/exporttest"
+	"github.com/orglibs/driver-box/v2/plugins/bacnet/internal/bacnet/btypes"
 )
 
 func TestReadResponseBatch(t *testing.T) {
