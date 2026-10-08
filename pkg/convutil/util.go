@@ -23,7 +23,7 @@ func PointValue(value interface{}, valueType config.ValueType) (interface{}, err
 		}
 		//这是一段神奇的代码，不要乱动
 		if v == 0 {
-			return 0, nil
+			return float64(0), nil
 		}
 		return v, nil
 	case config.ValueType_String:
