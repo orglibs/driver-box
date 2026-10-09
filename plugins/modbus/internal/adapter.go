@@ -174,16 +174,17 @@ func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, w
 	case HoldingRegister:
 		valueStr := fmt.Sprintf("%v", value)
 		switch strings.ToUpper(ext.RawType) {
-		case strings.ToUpper(ValueTypeInt16), strings.ToUpper(ValueTypeUint16):
-			v, err := strconv.ParseUint(valueStr, 10, 16)
+		case strings.ToUpper(ValueTypeInt16):
+			v, err := parseInt16Value(valueStr)
 			if err != nil {
 				return writeValue{}, fmt.Errorf("convert value %v to int16 error: %v", value, err)
 			}
 			if ext.BitLen > 0 {
-				if v > (1<<ext.BitLen - 1) {
-					return writeValue{}, fmt.Errorf("too large value %v to set in %d bits", v, ext.BitLen)
-				} else if v < 0 {
+				if v < 0 {
 					return writeValue{}, fmt.Errorf("negative value %v not allowed to set in bits", v)
+				}
+				if uint64(v) > (1<<ext.BitLen - 1) {
+					return writeValue{}, fmt.Errorf("too large value %v to set in %d bits", v, ext.BitLen)
 				}
 				var uint16s []uint16
 				var err error
@@ -223,16 +224,64 @@ func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, w
 				binary.BigEndian.PutUint16(out, uint16(v))
 			}
 			values = []uint16{binary.BigEndian.Uint16(out)}
+
+		case strings.ToUpper(ValueTypeUint16):
+			v, err := parseUint16Value(valueStr)
+			if err != nil {
+				return writeValue{}, fmt.Errorf("convert value %v to uint16 error: %v", value, err)
+			}
+			if ext.BitLen > 0 {
+				if uint64(v) > (1<<ext.BitLen - 1) {
+					return writeValue{}, fmt.Errorf("too large value %v to set in %d bits", v, ext.BitLen)
+				}
+				var uint16s []uint16
+				var err error
+				if c.virtual {
+					uint16s, err = c.mockRead(unitId, string(ext.RegisterType), ext.Address, ext.Quantity)
+				} else {
+					uint16s, err = c.read(unitId, string(ext.RegisterType), ext.Address, ext.Quantity)
+				}
+
+				if err != nil {
+					return writeValue{}, fmt.Errorf("read original register error: %v", err)
+				}
+				uint16Val := uint16s[0]
+				if ext.ByteSwap {
+					uint16Val = (uint16Val << 8) | (uint16Val >> 8)
+				}
+				intoUint16 := mergeBitsIntoUint16(int(v), ext.Bit, ext.BitLen, uint16Val)
+				if ext.ByteSwap {
+					intoUint16 = (intoUint16 << 8) | (intoUint16 >> 8)
+				}
+				// 如果之前已经写入过，则合并
+				for _, writeVal := range writeValues {
+					if writeVal.Address == ext.Address && writeVal.RegisterType == ext.RegisterType && len(writeVal.Value) == 1 {
+						driverbox.Log().Info("merge bits", zap.Uint16("preValue", writeVal.Value[0]), zap.Uint16("bitValue", intoUint16))
+						writeVal.Value[0] = (writeVal.Value[0] & ^(((1 << ext.BitLen) - 1) << ext.Bit)) | (intoUint16 & (((1 << ext.BitLen) - 1) << ext.Bit))
+						driverbox.Log().Info("merge bits result", zap.Uint16("finalVal", writeVal.Value[0]))
+						return writeValue{}, nil
+					}
+				}
+				values = []uint16{intoUint16}
+				break
+			}
+			out := make([]byte, 2)
+			if ext.ByteSwap {
+				binary.LittleEndian.PutUint16(out, v)
+			} else {
+				binary.BigEndian.PutUint16(out, v)
+			}
+			values = []uint16{binary.BigEndian.Uint16(out)}
 		case strings.ToUpper(ValueTypeUint32):
-			v, err := strconv.ParseUint(valueStr, 10, 32)
+			v, err := parseUint32Value(valueStr)
 			if err != nil {
 				return writeValue{}, fmt.Errorf("convert value %v to uint32 error: %v", value, err)
 			}
 			out := make([]byte, 4)
 			if ext.ByteSwap {
-				binary.LittleEndian.PutUint32(out, uint32(v))
+				binary.LittleEndian.PutUint32(out, v)
 			} else {
-				binary.BigEndian.PutUint32(out, uint32(v))
+				binary.BigEndian.PutUint32(out, v)
 			}
 			if ext.WordSwap {
 				out[0], out[1], out[2], out[3] =
@@ -241,7 +290,7 @@ func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, w
 			values = []uint16{binary.BigEndian.Uint16([]byte{out[2], out[3]}),
 				binary.BigEndian.Uint16([]byte{out[0], out[1]})}
 		case strings.ToUpper(ValueTypeInt32):
-			v, err := strconv.ParseInt(valueStr, 10, 32)
+			v, err := parseInt32Value(valueStr)
 			if err != nil {
 				return writeValue{}, fmt.Errorf("convert value %v to int32 error: %v", value, err)
 			}
@@ -277,7 +326,7 @@ func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, w
 			values = []uint16{binary.BigEndian.Uint16([]byte{out[2], out[3]}),
 				binary.BigEndian.Uint16([]byte{out[0], out[1]})}
 		case strings.ToUpper(ValueTypeUint64):
-			v, err := strconv.ParseUint(valueStr, 10, 64)
+			v, err := parseUint64Value(valueStr)
 			if err != nil {
 				return writeValue{}, fmt.Errorf("convert value %v to uint64 error: %v", value, err)
 			}
@@ -298,7 +347,7 @@ func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, w
 				binary.BigEndian.Uint16([]byte{out[0], out[1]}),
 			}
 		case strings.ToUpper(ValueTypeInt64):
-			v, err := strconv.ParseInt(valueStr, 10, 64)
+			v, err := parseInt64Value(valueStr)
 			if err != nil {
 				return writeValue{}, fmt.Errorf("convert value %v to int64 error: %v", value, err)
 			}
@@ -383,4 +432,132 @@ func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, w
 		Value:        values,
 		MultiWrite:   ext.MultiWrite,
 	}, nil
+}
+
+// parseUint16Value 解析 uint16 值，支持浮点字符串四舍五入（容错毛刺如 "101.99999999999999"）。
+func parseUint16Value(valueStr string) (uint16, error) {
+	// 先尝试直接作为无符号整数解析
+	if v, err := strconv.ParseUint(valueStr, 10, 16); err == nil {
+		return uint16(v), nil
+	}
+	// 针对带小数毛刺的浮点字符串，转为 float 后四舍五入
+	if f, err := strconv.ParseFloat(valueStr, 64); err == nil {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, fmt.Errorf("invalid uint16 syntax: %s", valueStr)
+		}
+		rounded := math.Round(f)
+		if rounded < 0 || rounded > math.MaxUint16 {
+			return 0, fmt.Errorf("value %v out of range for uint16", f)
+		}
+		return uint16(rounded), nil
+	}
+	return 0, fmt.Errorf("invalid uint16 syntax: %s", valueStr)
+}
+
+// parseInt16Value 解析 int16 值，支持浮点字符串四舍五入（容错毛刺如 "-32.00000000001"）。
+func parseInt16Value(valueStr string) (int16, error) {
+	// 先尝试直接作为有符号整数解析
+	if v, err := strconv.ParseInt(valueStr, 10, 16); err == nil {
+		return int16(v), nil
+	}
+	// 针对带小数毛刺的浮点字符串，转为 float 后四舍五入
+	if f, err := strconv.ParseFloat(valueStr, 64); err == nil {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, fmt.Errorf("invalid int16 syntax: %s", valueStr)
+		}
+		rounded := math.Round(f)
+		if rounded < math.MinInt16 || rounded > math.MaxInt16 {
+			return 0, fmt.Errorf("value %v out of range for int16", f)
+		}
+		return int16(rounded), nil
+	}
+	return 0, fmt.Errorf("invalid int16 syntax: %s", valueStr)
+}
+
+// parseUint32Value 解析 uint32 值，支持浮点字符串四舍五入（容错毛刺如 "65535.9999999"）。
+func parseUint32Value(valueStr string) (uint32, error) {
+	// 先尝试直接作为无符号整数解析
+	if v, err := strconv.ParseUint(valueStr, 10, 32); err == nil {
+		return uint32(v), nil
+	}
+	// 针对带小数毛刺的浮点字符串，转为 float 后四舍五入
+	if f, err := strconv.ParseFloat(valueStr, 64); err == nil {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, fmt.Errorf("invalid uint32 syntax: %s", valueStr)
+		}
+		rounded := math.Round(f)
+		if rounded < 0 || rounded > math.MaxUint32 {
+			return 0, fmt.Errorf("value %v out of range for uint32", f)
+		}
+		return uint32(rounded), nil
+	}
+	return 0, fmt.Errorf("invalid uint32 syntax: %s", valueStr)
+}
+
+// parseInt32Value 解析 int32 值，支持浮点字符串四舍五入（容错毛刺如 "-100.00000000001"）。
+func parseInt32Value(valueStr string) (int32, error) {
+	// 先尝试直接作为有符号整数解析
+	if v, err := strconv.ParseInt(valueStr, 10, 32); err == nil {
+		return int32(v), nil
+	}
+	// 针对带小数毛刺的浮点字符串，转为 float 后四舍五入
+	if f, err := strconv.ParseFloat(valueStr, 64); err == nil {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, fmt.Errorf("invalid int32 syntax: %s", valueStr)
+		}
+		rounded := math.Round(f)
+		if rounded < math.MinInt32 || rounded > math.MaxInt32 {
+			return 0, fmt.Errorf("value %v out of range for int32", f)
+		}
+		return int32(rounded), nil
+	}
+	return 0, fmt.Errorf("invalid int32 syntax: %s", valueStr)
+}
+
+// parseUint64Value 解析 uint64 值，支持浮点字符串四舍五入。
+func parseUint64Value(valueStr string) (uint64, error) {
+	// 先尝试直接作为无符号整数解析（保持完整 64 位整型精度）
+	v, err := strconv.ParseUint(valueStr, 10, 64)
+	if err == nil {
+		return v, nil
+	}
+	if errors.Is(err, strconv.ErrRange) {
+		return 0, fmt.Errorf("value %s out of range for uint64", valueStr)
+	}
+	// 针对带小数毛刺的浮点字符串，转为 float 后四舍五入
+	if f, err := strconv.ParseFloat(valueStr, 64); err == nil {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, fmt.Errorf("invalid uint64 syntax: %s", valueStr)
+		}
+		rounded := math.Round(f)
+		if rounded < 0 || rounded >= math.Exp2(64) {
+			return 0, fmt.Errorf("value %v out of range for uint64", f)
+		}
+		return uint64(rounded), nil
+	}
+	return 0, fmt.Errorf("invalid uint64 syntax: %s", valueStr)
+}
+
+// parseInt64Value 解析 int64 值，支持浮点字符串四舍五入。
+func parseInt64Value(valueStr string) (int64, error) {
+	// 先尝试直接作为有符号整数解析（保持完整 64 位整型精度）
+	v, err := strconv.ParseInt(valueStr, 10, 64)
+	if err == nil {
+		return v, nil
+	}
+	if errors.Is(err, strconv.ErrRange) {
+		return 0, fmt.Errorf("value %s out of range for int64", valueStr)
+	}
+	// 针对带小数毛刺的浮点字符串，转为 float 后四舍五入
+	if f, err := strconv.ParseFloat(valueStr, 64); err == nil {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, fmt.Errorf("invalid int64 syntax: %s", valueStr)
+		}
+		rounded := math.Round(f)
+		if rounded < math.MinInt64 || rounded >= math.Exp2(63) {
+			return 0, fmt.Errorf("value %v out of range for int64", f)
+		}
+		return int64(rounded), nil
+	}
+	return 0, fmt.Errorf("invalid int64 syntax: %s", valueStr)
 }
