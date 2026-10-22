@@ -18,9 +18,14 @@ import (
 
 const ProtocolName = "modbus"
 
+type closeableConnector interface {
+	plugin.Connector
+	Close()
+}
+
 // Plugin 驱动插件
 type Plugin struct {
-	connPool map[string]*connector // 连接器
+	connPool map[string]closeableConnector // 连接器
 	config   config.DeviceConfig
 }
 
@@ -61,7 +66,7 @@ func (p *Plugin) Initialize(c config.DeviceConfig) {
 
 // 初始化Modbus连接池
 func (p *Plugin) initNetworks(config config.DeviceConfig) {
-	p.connPool = make(map[string]*connector)
+	p.connPool = make(map[string]closeableConnector)
 	//某个连接配置有问题，不影响其他连接的建立
 	for key, connConfig := range config.Connections {
 		connectionConfig := new(ConnectionConfig)
@@ -69,8 +74,47 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 			driverbox.Log().Error("convert connector config error", zap.Any("connection", connConfig), zap.Error(err))
 			continue
 		}
+		connectionConfig.ConnectionKey = key
+
+		if connectionConfig.Mode == "reverse_tcp" {
+			rc, err := newReverseConnector(p, connectionConfig)
+			if err != nil {
+				driverbox.Log().Error("init reverse connector error", zap.Any("connection", connConfig), zap.Error(err))
+				continue
+			}
+
+			// 生成反向连接的点位采集组和设备映射
+			for _, model := range config.DeviceModels {
+				for _, dev := range model.Devices {
+					if dev.ConnectionKey != connectionConfig.ConnectionKey {
+						continue
+					}
+					rc.addDevice(model, dev)
+				}
+			}
+
+			if len(rc.devicesMeta) == 0 {
+				_ = driverbox.CoreCache().DeleteConnection(connectionConfig.ConnectionKey)
+				driverbox.Log().Warn("delete idle reverse connection", zap.Any("connection", connConfig))
+				rc.Close()
+				continue
+			}
+			if !connectionConfig.Enable {
+				driverbox.Log().Warn("modbus reverse connection is disabled, ignore collect task", zap.String("key", key))
+				rc.Close()
+				continue
+			}
+
+			// 启动反向采集任务
+			rc.collectTask, err = rc.initCollectTask()
+			p.connPool[key] = rc
+			if err != nil {
+				driverbox.Log().Error("init reverse connector collect task error", zap.Any("connection", connConfig), zap.Error(err))
+			}
+			continue
+		}
+
 		conn, err := newConnector(p, connectionConfig)
-		conn.config.ConnectionKey = key
 		if err != nil {
 			driverbox.Log().Error("init connector error", zap.Any("connection", connConfig), zap.Error(err))
 			continue

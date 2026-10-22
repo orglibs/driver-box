@@ -45,21 +45,30 @@ const (
 	ValueTypeObject       = "Object"
 )
 
+// IdentifyConfig 反向模式设备身份识别配置
+type IdentifyConfig struct {
+	StartAddress uint16 `json:"startAddress"` // 探测寄存器起始地址，如 27 (0x001B)
+	Quantity     uint16 `json:"quantity"`     // 探测寄存器长度，如 16
+	Format       string `json:"format"`       // 解析格式: "ascii" 或 "hex"，默认 "ascii"
+	Timeout      uint16 `json:"timeout"`      // 握手超时时间(ms)，默认 3000
+}
+
 // ConnectionConfig 连接器配置
 type ConnectionConfig struct {
 	plugin.BaseConnection
-	Address       string `json:"address"`       // 地址：例如：127.0.0.1:502
-	Mode          string `json:"mode"`          // 连接模式：rtuovertcp、rtu
-	BaudRate      uint   `json:"baudRate"`      // 波特率（仅串口模式）
-	DataBits      uint   `json:"dataBits"`      // 数据位（仅串口模式）
-	StopBits      uint   `json:"stopBits"`      // 停止位（仅串口模式）
-	Parity        uint   `json:"parity"`        // 奇偶性校验（仅串口模式）
-	BatchReadLen  uint16 `json:"batchReadLen"`  // 最长连续读个数
-	BatchWriteLen uint16 `json:"batchWriteLen"` // 支持连续写的最大长度
-	MinInterval   uint16 `json:"minInterval"`   // 最小读取间隔
-	Timeout       uint16 `json:"timeout"`       // 请求超时
-	Retry         int    `json:"retry"`         // 重试次数
-	ScanInterval  string `json:"scanInterval"`  // 采集任务扫描周期，默认1s
+	Address       string          `json:"address"`       // 地址：例如：127.0.0.1:502，反向模式为监听地址 0.0.0.0:12407
+	Mode          string          `json:"mode"`          // 连接模式：rtuovertcp、rtu、tcp、reverse_tcp
+	BaudRate      uint            `json:"baudRate"`      // 波特率（仅串口模式）
+	DataBits      uint            `json:"dataBits"`      // 数据位（仅串口模式）
+	StopBits      uint            `json:"stopBits"`      // 停止位（仅串口模式）
+	Parity        uint            `json:"parity"`        // 奇偶性校验（仅串口模式）
+	BatchReadLen  uint16          `json:"batchReadLen"`  // 最长连续读个数
+	BatchWriteLen uint16          `json:"batchWriteLen"` // 支持连续写的最大长度
+	MinInterval   uint16          `json:"minInterval"`   // 最小读取间隔
+	Timeout       uint16          `json:"timeout"`       // 请求超时
+	Retry         int             `json:"retry"`         // 重试次数
+	ScanInterval  string          `json:"scanInterval"`  // 采集任务扫描周期，默认1s
+	Identify      *IdentifyConfig `json:"identify,omitempty"` // 反向连接设备识别配置
 }
 
 // Point modbus点位
@@ -119,6 +128,7 @@ type command struct {
 
 // 写操作时 command的value类型
 type writeValue struct {
+	DeviceId string // 目标设备ID
 	// 从机地址
 	unitID  uint8
 	Address uint16

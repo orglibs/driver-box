@@ -426,6 +426,7 @@ func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, w
 		return writeValue{}, fmt.Errorf("unsupported write register type: %v", ext)
 	}
 	return writeValue{
+		DeviceId:     deviceId,
 		unitID:       unitId,
 		RegisterType: ext.RegisterType,
 		Address:      ext.Address,
