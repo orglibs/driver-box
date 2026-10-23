@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,12 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	identifyModeModbusRegister = "modbus_register"
+	identifyModeSourceIP       = "source_ip"
+	identifyModeSingleDevice   = "single_device"
+)
+
 // reverseSession 代表一个连入的 Modbus TCP 客户端会话
 type reverseSession struct {
 	deviceId  string
@@ -27,20 +34,19 @@ type reverseSession struct {
 	lastTxnId uint16
 	mu        sync.Mutex
 	createdAt time.Time
-	closed    bool
+	closed    atomic.Bool
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func (s *reverseSession) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return nil
-	}
-	s.closed = true
-	if s.conn != nil {
-		return s.conn.Close()
-	}
-	return nil
+	s.closeOnce.Do(func() {
+		s.closed.Store(true)
+		if s.conn != nil {
+			s.closeErr = s.conn.Close()
+		}
+	})
+	return s.closeErr
 }
 
 // execute 发送 Modbus TCP 报文并同步等待应答
@@ -48,7 +54,7 @@ func (s *reverseSession) execute(slaveId uint8, functionCode uint8, payload []by
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.closed || s.conn == nil {
+	if s.closed.Load() || s.conn == nil {
 		return nil, errors.New("modbus connection closed")
 	}
 
@@ -219,15 +225,23 @@ func (s *reverseSession) writeCoils(slaveId uint8, address uint16, values []bool
 }
 
 // reverseConnector 反向 Modbus TCP 连接器
+type reverseWriteState struct {
+	inFlight        atomic.Int32
+	latestWriteTime atomic.Int64
+}
+
 type reverseConnector struct {
-	config   *ConnectionConfig
-	plugin   *Plugin
-	listener net.Listener
-	closed   bool
-	mutex    sync.RWMutex
+	config    *ConnectionConfig
+	plugin    *Plugin
+	listener  net.Listener
+	closed    atomic.Bool
+	mutex     sync.RWMutex
+	startOnce sync.Once
+	closeOnce sync.Once
 
 	// deviceSessions 活跃会话映射：deviceId -> *reverseSession
 	deviceSessions map[string]*reverseSession
+	pendingConns   map[net.Conn]struct{}
 	// connDevices 反向索引：net.Conn -> deviceId
 	connDevices map[net.Conn]string
 
@@ -238,13 +252,18 @@ type reverseConnector struct {
 
 	collectTask *crontab.Future
 
-	writeSemaphore  atomic.Int32
-	latestWriteTime time.Time
-	writeEncodeMu   sync.Mutex
-	latestIoTimes   sync.Map // deviceId -> time.Time
+	latestIoTimes sync.Map // deviceId -> time.Time
+	intervalLocks sync.Map // deviceId -> *sync.Mutex
+	writeStates   sync.Map // deviceId -> *reverseWriteState
 }
 
 func newReverseConnector(p *Plugin, cf *ConnectionConfig) (*reverseConnector, error) {
+	if cf == nil {
+		return nil, errors.New("modbus reverse connection config is required")
+	}
+	if err := normalizeIdentifyConfig(cf.Identify); err != nil {
+		return nil, err
+	}
 	if cf.MinInterval == 0 {
 		cf.MinInterval = 100
 	}
@@ -257,6 +276,9 @@ func newReverseConnector(p *Plugin, cf *ConnectionConfig) (*reverseConnector, er
 	if cf.BatchReadLen == 0 {
 		cf.BatchReadLen = 32
 	}
+	if cf.BatchWriteLen == 0 {
+		cf.BatchWriteLen = 120
+	}
 
 	listener, err := net.Listen("tcp", cf.Address)
 	if err != nil {
@@ -268,15 +290,138 @@ func newReverseConnector(p *Plugin, cf *ConnectionConfig) (*reverseConnector, er
 		plugin:            p,
 		listener:          listener,
 		deviceSessions:    make(map[string]*reverseSession),
+		pendingConns:      make(map[net.Conn]struct{}),
 		connDevices:       make(map[net.Conn]string),
 		devicePointGroups: make(map[string][]*pointGroup),
 		devicesMeta:       make(map[string]config.Device),
 	}
 
-	// 启动后台 TCP 接收循环
-	go rc.acceptLoop()
-
 	return rc, nil
+}
+
+func normalizeIdentifyConfig(identify *IdentifyConfig) error {
+	if identify == nil {
+		return errors.New("reverse mode requires identify configuration")
+	}
+	identify.Mode = strings.TrimSpace(identify.Mode)
+
+	switch identify.Mode {
+	case identifyModeModbusRegister:
+		if identify.Quantity == 0 || identify.Quantity > 125 {
+			return errors.New("identify.quantity must be between 1 and 125 for modbus_register")
+		}
+		if uint32(identify.StartAddress)+uint32(identify.Quantity) > 1<<16 {
+			return errors.New("identify.startAddress and quantity exceed the Modbus register address range")
+		}
+		if identify.UnitID == 0 {
+			identify.UnitID = 1
+		}
+		identify.Format = strings.ToLower(strings.TrimSpace(identify.Format))
+		if identify.Format == "" {
+			identify.Format = "ascii"
+		}
+		if identify.Format != "ascii" && identify.Format != "hex" {
+			return errors.New("identify.format must be ascii or hex")
+		}
+		if identify.Timeout == 0 {
+			identify.Timeout = 3000
+		}
+	case identifyModeSourceIP, identifyModeSingleDevice:
+	default:
+		return fmt.Errorf("unsupported identify.mode %q", identify.Mode)
+	}
+	return nil
+}
+
+func (rc *reverseConnector) validateDeviceBinding() error {
+	identify := rc.config.Identify
+	if identify.Mode == identifyModeSingleDevice {
+		if len(rc.devicesMeta) != 1 {
+			return fmt.Errorf("identify.mode single_device requires exactly one configured device, got %d", len(rc.devicesMeta))
+		}
+		return nil
+	}
+
+	property := ""
+	switch identify.Mode {
+	case identifyModeModbusRegister:
+		property = "esn"
+	case identifyModeSourceIP:
+		property = "ip"
+	default:
+		return fmt.Errorf("unsupported identify.mode %q", identify.Mode)
+	}
+	deviceIDs := make([]string, 0, len(rc.devicesMeta))
+	for deviceID := range rc.devicesMeta {
+		deviceIDs = append(deviceIDs, deviceID)
+	}
+	sort.Strings(deviceIDs)
+
+	seenValues := make(map[string]string, len(deviceIDs))
+	type ipBinding struct {
+		deviceID string
+		network  *net.IPNet
+	}
+	var ipBindings []ipBinding
+	for _, deviceID := range deviceIDs {
+		device := rc.devicesMeta[deviceID]
+		value := device.Properties[property]
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("device %q has no properties.%s value for reverse identification", deviceID, property)
+		}
+		if identify.Mode == identifyModeModbusRegister {
+			if previous, exists := seenValues[value]; exists {
+				return fmt.Errorf("devices %q and %q share properties.esn value %q", previous, deviceID, value)
+			}
+			seenValues[value] = deviceID
+		}
+		if identify.Mode == identifyModeSourceIP {
+			network, err := parseIdentifyIPRange(value)
+			if err != nil {
+				return fmt.Errorf("device %q has invalid properties.ip value %q: %w", deviceID, value, err)
+			}
+			for _, previous := range ipBindings {
+				if ipRangesOverlap(previous.network, network) {
+					return fmt.Errorf("devices %q and %q have overlapping source IP match ranges", previous.deviceID, deviceID)
+				}
+			}
+			ipBindings = append(ipBindings, ipBinding{deviceID: deviceID, network: network})
+		}
+	}
+	return nil
+}
+
+func parseIdentifyIPRange(value string) (*net.IPNet, error) {
+	value = strings.TrimSpace(value)
+	if ip := net.ParseIP(value); ip != nil {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			return &net.IPNet{IP: ipv4, Mask: net.CIDRMask(32, 32)}, nil
+		}
+		return &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)}, nil
+	}
+	_, network, err := net.ParseCIDR(value)
+	if err != nil {
+		return nil, err
+	}
+	if ipv4 := network.IP.To4(); ipv4 != nil {
+		network.IP = ipv4
+	}
+	return network, nil
+}
+
+func ipRangesOverlap(a, b *net.IPNet) bool {
+	if (a.IP.To4() == nil) != (b.IP.To4() == nil) {
+		return false
+	}
+	return a.Contains(b.IP) || b.Contains(a.IP)
+}
+
+func (rc *reverseConnector) Start() {
+	rc.startOnce.Do(func() {
+		if !rc.closed.Load() {
+			go rc.acceptLoop()
+		}
+	})
 }
 
 func modbusLog() *zap.Logger {
@@ -292,18 +437,40 @@ func (rc *reverseConnector) acceptLoop() {
 	for {
 		conn, err := rc.listener.Accept()
 		if err != nil {
-			if rc.closed {
+			if rc.closed.Load() {
 				return
 			}
 			modbusLog().Warn("modbus reverse accept error", zap.Error(err))
 			continue
 		}
 		modbusLog().Info("modbus reverse client connected", zap.String("remoteAddr", conn.RemoteAddr().String()))
+		if !rc.trackPendingConn(conn) {
+			_ = conn.Close()
+			continue
+		}
 		go rc.handleIncomingConn(conn)
 	}
 }
 
+func (rc *reverseConnector) trackPendingConn(conn net.Conn) bool {
+	rc.mutex.Lock()
+	defer rc.mutex.Unlock()
+	if rc.closed.Load() {
+		return false
+	}
+	rc.pendingConns[conn] = struct{}{}
+	return true
+}
+
+func (rc *reverseConnector) untrackPendingConn(conn net.Conn) {
+	rc.mutex.Lock()
+	delete(rc.pendingConns, conn)
+	rc.mutex.Unlock()
+}
+
 func (rc *reverseConnector) handleIncomingConn(conn net.Conn) {
+	defer rc.untrackPendingConn(conn)
+
 	timeout := time.Duration(rc.config.Timeout) * time.Millisecond
 	if rc.config.Identify != nil && rc.config.Identify.Timeout > 0 {
 		timeout = time.Duration(rc.config.Identify.Timeout) * time.Millisecond
@@ -321,7 +488,11 @@ func (rc *reverseConnector) handleIncomingConn(conn net.Conn) {
 		modbusLog().Warn("modbus reverse identify client failed, disconnecting",
 			zap.String("remoteAddr", conn.RemoteAddr().String()),
 			zap.Error(err))
-		_ = conn.Close()
+		_ = session.Close()
+		return
+	}
+	if rc.closed.Load() {
+		_ = session.Close()
 		return
 	}
 
@@ -329,26 +500,38 @@ func (rc *reverseConnector) handleIncomingConn(conn net.Conn) {
 	session.timeout = time.Duration(rc.config.Timeout) * time.Millisecond
 
 	// 注册会话并踢除旧连接
-	rc.registerSession(deviceId, session)
+	if !rc.registerSession(deviceId, session) {
+		_ = session.Close()
+		return
+	}
 
 	modbusLog().Info("modbus reverse client successfully bound to device",
 		zap.String("deviceId", deviceId),
 		zap.String("remoteAddr", conn.RemoteAddr().String()))
 }
 
-// identifyDevice 通过探针读取或 IP 匹配确定连入设备的 deviceId
+// identifyDevice uses the configured strategy to bind an incoming session to one device.
 func (rc *reverseConnector) identifyDevice(session *reverseSession) (string, error) {
-	rc.mutex.RLock()
-	defer rc.mutex.RUnlock()
+	if rc.config == nil || rc.config.Identify == nil {
+		return "", errors.New("reverse mode requires identify configuration")
+	}
+	identify := rc.config.Identify
 
-	// 1. 如果配置了 identify 探针，向客户端主动发送 Modbus 03 读取 ESN
-	if rc.config.Identify != nil && rc.config.Identify.Quantity > 0 {
-		regs, err := session.readRegisters(1, 0x03, rc.config.Identify.StartAddress, rc.config.Identify.Quantity)
+	rc.mutex.RLock()
+	devicesMeta := make(map[string]config.Device, len(rc.devicesMeta))
+	for id, device := range rc.devicesMeta {
+		devicesMeta[id] = device
+	}
+	rc.mutex.RUnlock()
+
+	switch identify.Mode {
+	case identifyModeModbusRegister:
+		regs, err := session.readRegisters(identify.UnitID, 0x03, identify.StartAddress, identify.Quantity)
 		if err != nil {
-			return "", fmt.Errorf("probe read failed: %w", err)
+			return "", fmt.Errorf("modbus_register probe read failed: %w", err)
 		}
 		var ident string
-		if strings.ToLower(rc.config.Identify.Format) == "hex" {
+		if identify.Format == "hex" {
 			var sb strings.Builder
 			for _, val := range regs {
 				sb.WriteString(fmt.Sprintf("%04x", val))
@@ -363,57 +546,97 @@ func (rc *reverseConnector) identifyDevice(session *reverseSession) (string, err
 			}
 			ident = strings.TrimRight(string(bytes), "\x00 \t\r\n")
 		}
+		if ident == "" {
+			return "", errors.New("modbus_register probe returned an empty identity")
+		}
 
 		modbusLog().Info("modbus reverse probed device identity",
 			zap.String("remoteAddr", session.conn.RemoteAddr().String()),
 			zap.String("identity", ident))
 
-		// 匹配设备
-		for devId, dev := range rc.devicesMeta {
-			if dev.Properties != nil {
-				if dev.Properties["esn"] == ident || dev.Properties["device_key"] == ident || dev.Properties["identify"] == ident {
-					return devId, nil
-				}
-			}
-			if devId == ident {
-				return devId, nil
+		var matches []string
+		for deviceID, device := range devicesMeta {
+			if device.Properties["esn"] == ident {
+				matches = append(matches, deviceID)
 			}
 		}
-		return "", fmt.Errorf("no configured device matches probed identity %q", ident)
-	}
+		return resolveUniqueDevice(matches, fmt.Sprintf("properties.esn value %q", ident))
 
-	// 2. 未配置 identify，尝试按客户端 IP 匹配
-	remoteHost, _, err := net.SplitHostPort(session.conn.RemoteAddr().String())
-	if err == nil {
-		for devId, dev := range rc.devicesMeta {
-			if dev.Properties != nil && dev.Properties["ip"] == remoteHost {
-				return devId, nil
+	case identifyModeSourceIP:
+		remoteIP, err := identifyRemoteIP(session.conn.RemoteAddr())
+		if err != nil {
+			return "", err
+		}
+		var matches []string
+		for deviceID, device := range devicesMeta {
+			network, err := parseIdentifyIPRange(device.Properties["ip"])
+			if err != nil {
+				return "", fmt.Errorf("device %q has invalid IP match value: %w", deviceID, err)
+			}
+			if network.Contains(remoteIP) {
+				matches = append(matches, deviceID)
 			}
 		}
-	}
+		return resolveUniqueDevice(matches, fmt.Sprintf("source IP %s", remoteIP.String()))
 
-	// 3. 若只有一个设备且未配置任何区分，直接绑定
-	if len(rc.devicesMeta) == 1 {
-		for devId := range rc.devicesMeta {
-			return devId, nil
+	case identifyModeSingleDevice:
+		if len(devicesMeta) != 1 {
+			return "", fmt.Errorf("single_device requires exactly one configured device, got %d", len(devicesMeta))
+		}
+		for deviceID := range devicesMeta {
+			return deviceID, nil
 		}
 	}
 
-	return "", fmt.Errorf("unable to identify client %s: no matching esn or ip", session.conn.RemoteAddr().String())
+	return "", fmt.Errorf("unsupported identify.mode %q", identify.Mode)
 }
 
-func (rc *reverseConnector) registerSession(deviceId string, session *reverseSession) {
+func identifyRemoteIP(address net.Addr) (net.IP, error) {
+	if tcpAddress, ok := address.(*net.TCPAddr); ok && tcpAddress.IP != nil {
+		return tcpAddress.IP, nil
+	}
+	host, _, err := net.SplitHostPort(address.String())
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse remote IP from %q: %w", address.String(), err)
+	}
+	if zoneIndex := strings.LastIndex(host, "%"); zoneIndex >= 0 {
+		host = host[:zoneIndex]
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil, fmt.Errorf("remote address %q is not an IP address", address.String())
+	}
+	return ip, nil
+}
+
+func resolveUniqueDevice(matches []string, description string) (string, error) {
+	sort.Strings(matches)
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no configured device matches %s", description)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("multiple configured devices match %s: %s", description, strings.Join(matches, ", "))
+	}
+}
+
+func (rc *reverseConnector) registerSession(deviceId string, session *reverseSession) bool {
 	rc.mutex.Lock()
-	defer rc.mutex.Unlock()
+	if rc.closed.Load() {
+		rc.mutex.Unlock()
+		return false
+	}
 
 	// 踢除旧连接（如果桩掉线重连）
-	if old, exists := rc.deviceSessions[deviceId]; exists {
+	var old *reverseSession
+	if existing, exists := rc.deviceSessions[deviceId]; exists {
+		old = existing
 		modbusLog().Warn("client reconnected, kicking off stale connection",
 			zap.String("deviceId", deviceId),
-			zap.String("oldAddr", old.conn.RemoteAddr().String()),
+			zap.String("oldAddr", existing.conn.RemoteAddr().String()),
 			zap.String("newAddr", session.conn.RemoteAddr().String()))
-		_ = old.Close()
-		delete(rc.connDevices, old.conn)
+		delete(rc.connDevices, existing.conn)
 	}
 
 	session.deviceId = deviceId
@@ -424,20 +647,27 @@ func (rc *reverseConnector) registerSession(deviceId string, session *reverseSes
 	if shadow := driverbox.Shadow(); shadow != nil {
 		_ = shadow.SetOnline(deviceId)
 	}
+	rc.mutex.Unlock()
+
+	if old != nil {
+		_ = old.Close()
+	}
+	return true
 }
 
 func (rc *reverseConnector) removeSessionByConn(conn net.Conn) {
 	rc.mutex.Lock()
-	defer rc.mutex.Unlock()
-
 	deviceId, ok := rc.connDevices[conn]
 	if !ok {
+		rc.mutex.Unlock()
 		return
 	}
 	delete(rc.connDevices, conn)
 
+	var removed *reverseSession
 	if current, exists := rc.deviceSessions[deviceId]; exists && current.conn == conn {
 		delete(rc.deviceSessions, deviceId)
+		removed = current
 		modbusLog().Warn("modbus reverse client disconnected, marking device offline",
 			zap.String("deviceId", deviceId),
 			zap.String("remoteAddr", conn.RemoteAddr().String()))
@@ -445,13 +675,18 @@ func (rc *reverseConnector) removeSessionByConn(conn net.Conn) {
 			_ = shadow.SetOffline(deviceId)
 		}
 	}
+	rc.mutex.Unlock()
+
+	if removed != nil {
+		_ = removed.Close()
+	}
 }
 
 func (rc *reverseConnector) getSession(deviceId string) (*reverseSession, bool) {
 	rc.mutex.RLock()
 	defer rc.mutex.RUnlock()
 	session, ok := rc.deviceSessions[deviceId]
-	if !ok || session.closed {
+	if !ok || session.closed.Load() {
 		return nil, false
 	}
 	return session, true
@@ -523,6 +758,34 @@ func (rc *reverseConnector) addDevice(model config.DeviceModel, dev config.Devic
 	rc.devicePointGroups[dev.ID] = groups
 }
 
+func (rc *reverseConnector) writeState(deviceID string) *reverseWriteState {
+	state, _ := rc.writeStates.LoadOrStore(deviceID, &reverseWriteState{})
+	return state.(*reverseWriteState)
+}
+
+func (rc *reverseConnector) shouldAvoidRead(deviceID string, now time.Time) bool {
+	state := rc.writeState(deviceID)
+	if state.inFlight.Load() > 0 {
+		return true
+	}
+	lastWrite := state.latestWriteTime.Load()
+	return lastWrite != 0 && time.Unix(0, lastWrite).Add(time.Duration(rc.config.MinInterval)*time.Millisecond).After(now)
+}
+
+func isReverseConnectionClosed(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "closed") ||
+		strings.Contains(message, "broken pipe") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "forcibly closed")
+}
+
 func (rc *reverseConnector) initCollectTask() (*crontab.Future, error) {
 	scanInterval, err := crontab.ParseDurationOrDefault(rc.config.ScanInterval, time.Second)
 	if err != nil {
@@ -530,7 +793,7 @@ func (rc *reverseConnector) initCollectTask() (*crontab.Future, error) {
 	}
 
 	return driverbox.AddFunc(scanInterval.String(), func() {
-		if rc.closed {
+		if rc.closed.Load() {
 			return
 		}
 		rc.mutex.RLock()
@@ -551,7 +814,7 @@ func (rc *reverseConnector) initCollectTask() (*crontab.Future, error) {
 			rc.mutex.RUnlock()
 
 			for _, group := range groups {
-				if rc.closed {
+				if rc.closed.Load() {
 					return
 				}
 				duration := group.Duration
@@ -569,7 +832,7 @@ func (rc *reverseConnector) initCollectTask() (*crontab.Future, error) {
 				}
 
 				// 写操作避让
-				if rc.writeSemaphore.Load() > 0 || rc.latestWriteTime.Add(time.Duration(rc.config.MinInterval)*time.Millisecond).After(time.Now()) {
+				if rc.shouldAvoidRead(devId, time.Now()) {
 					continue
 				}
 
@@ -577,25 +840,40 @@ func (rc *reverseConnector) initCollectTask() (*crontab.Future, error) {
 					Mode:  plugin.ReadMode,
 					Value: group,
 				}
-				if err := rc.sendReadCommand(session, devId, bac); err != nil {
+				err := rc.sendReadCommand(session, devId, bac)
+				group.LatestTime = time.Now()
+				if err != nil {
 					modbusLog().Error("modbus reverse read error",
 						zap.String("deviceId", devId),
 						zap.Any("group", group),
 						zap.Error(err))
 					group.TimeOutCount++
-					if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "closed") || strings.Contains(err.Error(), "broken pipe") {
+					if shadow := driverbox.Shadow(); shadow != nil {
+						_ = shadow.MayBeOffline(devId)
+					}
+					if isReverseConnectionClosed(err) {
 						rc.removeSessionByConn(session.conn)
+						break
 					}
 				} else {
+					if group.TimeOutCount > 0 {
+						if shadow := driverbox.Shadow(); shadow != nil {
+							_ = shadow.SetOnline(devId)
+						}
+					}
 					group.TimeOutCount = 0
 				}
-				group.LatestTime = time.Now()
 			}
 		}
 	})
 }
 
-func (rc *reverseConnector) ensureInterval(deviceId string) {
+func (rc *reverseConnector) withInterval(deviceId string, operation func() error) error {
+	lockValue, _ := rc.intervalLocks.LoadOrStore(deviceId, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
 	if val, ok := rc.latestIoTimes.Load(deviceId); ok {
 		lastTime := val.(time.Time)
 		np := lastTime.Add(time.Duration(rc.config.MinInterval) * time.Millisecond)
@@ -603,7 +881,34 @@ func (rc *reverseConnector) ensureInterval(deviceId string) {
 			time.Sleep(time.Until(np))
 		}
 	}
+	err := operation()
 	rc.latestIoTimes.Store(deviceId, time.Now())
+	return err
+}
+
+func (rc *reverseConnector) readOriginalRegister(deviceId string, unitID uint8, registerType string, address, quantity uint16) ([]uint16, error) {
+	session, ok := rc.getSession(deviceId)
+	if !ok {
+		return nil, fmt.Errorf("device [%s] is not connected", deviceId)
+	}
+
+	var functionCode uint8
+	switch strings.ToUpper(registerType) {
+	case string(HoldingRegister):
+		functionCode = 0x03
+	case string(InputRegister):
+		functionCode = 0x04
+	default:
+		return nil, fmt.Errorf("unsupported register type for read-modify-write: %s", registerType)
+	}
+
+	var values []uint16
+	err := rc.withInterval(deviceId, func() error {
+		var err error
+		values, err = session.readRegisters(unitID, functionCode, address, quantity)
+		return err
+	})
+	return values, err
 }
 
 func (rc *reverseConnector) sendReadCommand(session *reverseSession, deviceId string, data command) error {
@@ -612,23 +917,23 @@ func (rc *reverseConnector) sendReadCommand(session *reverseSession, deviceId st
 		return errors.New("read quantity is zero")
 	}
 
-	rc.ensureInterval(deviceId)
-
 	var values []uint16
-	var err error
-
-	switch strings.ToUpper(string(group.RegisterType)) {
-	case string(Coil):
-		values, err = session.readBits(group.UnitID, 0x01, group.Address, group.Quantity)
-	case string(DiscreteInput):
-		values, err = session.readBits(group.UnitID, 0x02, group.Address, group.Quantity)
-	case string(InputRegister):
-		values, err = session.readRegisters(group.UnitID, 0x04, group.Address, group.Quantity)
-	case string(HoldingRegister):
-		values, err = session.readRegisters(group.UnitID, 0x03, group.Address, group.Quantity)
-	default:
-		return fmt.Errorf("unsupported register type: %s", group.RegisterType)
-	}
+	err := rc.withInterval(deviceId, func() error {
+		var err error
+		switch strings.ToUpper(string(group.RegisterType)) {
+		case string(Coil):
+			values, err = session.readBits(group.UnitID, 0x01, group.Address, group.Quantity)
+		case string(DiscreteInput):
+			values, err = session.readBits(group.UnitID, 0x02, group.Address, group.Quantity)
+		case string(InputRegister):
+			values, err = session.readRegisters(group.UnitID, 0x04, group.Address, group.Quantity)
+		case string(HoldingRegister):
+			values, err = session.readRegisters(group.UnitID, 0x03, group.Address, group.Quantity)
+		default:
+			return fmt.Errorf("unsupported register type: %s", group.RegisterType)
+		}
+		return err
+	})
 
 	if err != nil {
 		return err
@@ -718,36 +1023,36 @@ func (rc *reverseConnector) Send(data interface{}) error {
 
 	switch cmd.Mode {
 	case plugin.WriteMode:
-		rc.writeEncodeMu.Lock()
-		defer rc.writeEncodeMu.Unlock()
 		values := cmd.Value.([]*writeValue)
 		for _, wv := range values {
 			session, ok := rc.getSession(wv.DeviceId)
 			if !ok {
 				return fmt.Errorf("device [%s] is not connected", wv.DeviceId)
 			}
-			rc.ensureInterval(wv.DeviceId)
-			rc.writeSemaphore.Add(1)
-			var err error
-			switch wv.RegisterType {
-			case Coil:
-				bools := uint16SliceToBool(wv.Value)
-				if len(bools) == 1 {
-					err = session.writeCoil(wv.unitID, wv.Address, bools[0])
-				} else if len(bools) > 1 {
-					err = session.writeCoils(wv.unitID, wv.Address, bools)
+			state := rc.writeState(wv.DeviceId)
+			state.inFlight.Add(1)
+			err := rc.withInterval(wv.DeviceId, func() error {
+				switch wv.RegisterType {
+				case Coil:
+					bools := uint16SliceToBool(wv.Value)
+					if len(bools) == 1 {
+						return session.writeCoil(wv.unitID, wv.Address, bools[0])
+					} else if len(bools) > 1 {
+						return session.writeCoils(wv.unitID, wv.Address, bools)
+					}
+				case HoldingRegister:
+					if len(wv.Value) == 1 && !wv.MultiWrite {
+						return session.writeRegister(wv.unitID, wv.Address, wv.Value[0])
+					} else if len(wv.Value) > 0 {
+						return session.writeRegisters(wv.unitID, wv.Address, wv.Value)
+					}
+				default:
+					return fmt.Errorf("unsupported write register type: %v", wv.RegisterType)
 				}
-			case HoldingRegister:
-				if len(wv.Value) == 1 && !wv.MultiWrite {
-					err = session.writeRegister(wv.unitID, wv.Address, wv.Value[0])
-				} else if len(wv.Value) > 0 {
-					err = session.writeRegisters(wv.unitID, wv.Address, wv.Value)
-				}
-			default:
-				err = fmt.Errorf("unsupported write register type: %v", wv.RegisterType)
-			}
-			rc.latestWriteTime = time.Now()
-			rc.writeSemaphore.Add(-1)
+				return errors.New("write data is empty")
+			})
+			state.inFlight.Add(-1)
+			state.latestWriteTime.Store(time.Now().UnixNano())
 			if err != nil {
 				return err
 			}
@@ -777,9 +1082,12 @@ func (rc *reverseConnector) Decode(raw interface{}) (res []plugin.DeviceData, er
 func (rc *reverseConnector) Encode(deviceId string, mode plugin.EncodeMode, values ...plugin.PointData) (interface{}, error) {
 	if mode == plugin.WriteMode {
 		writeValues := make([]*writeValue, 0)
-		dummyConn := &connector{}
+		codec := &connector{}
+		read := func(unitID uint8, registerType string, address, quantity uint16) ([]uint16, error) {
+			return rc.readOriginalRegister(deviceId, unitID, registerType, address, quantity)
+		}
 		for _, p := range values {
-			wv, err := dummyConn.getWriteValue(deviceId, p, writeValues)
+			wv, err := codec.getWriteValueWithReader(deviceId, p, writeValues, read)
 			if err != nil {
 				return nil, err
 			}
@@ -791,10 +1099,48 @@ func (rc *reverseConnector) Encode(deviceId string, mode plugin.EncodeMode, valu
 		}
 		return command{
 			Mode:  plugin.WriteMode,
-			Value: writeValues,
+			Value: mergeReverseWriteValues(writeValues, rc.config.BatchWriteLen),
 		}, nil
 	}
 	return nil, errors.New("reverse connector encode only supports write mode")
+}
+
+func mergeReverseWriteValues(values []*writeValue, batchWriteLen uint16) []*writeValue {
+	if batchWriteLen > 123 {
+		batchWriteLen = 123
+	}
+
+	merged := make([]*writeValue, 0, len(values))
+	for i := 0; i < len(values); {
+		if values[i].RegisterType != HoldingRegister || len(values[i].Value) == 0 {
+			merged = append(merged, values[i])
+			i++
+			continue
+		}
+
+		end := i + 1
+		for end < len(values) && values[end].RegisterType == HoldingRegister && len(values[end].Value) > 0 {
+			end++
+		}
+		run := values[i:end]
+		sort.SliceStable(run, func(i, j int) bool {
+			return run[i].Address < run[j].Address
+		})
+
+		var previous *writeValue
+		for _, value := range run {
+			if previous != nil && previous.DeviceId == value.DeviceId && previous.unitID == value.unitID &&
+				int(previous.Address)+len(previous.Value) == int(value.Address) &&
+				uint16(len(previous.Value)+len(value.Value)) <= batchWriteLen {
+				previous.Value = append(previous.Value, value.Value...)
+				continue
+			}
+			previous = value
+			merged = append(merged, value)
+		}
+		i = end
+	}
+	return merged
 }
 
 func (rc *reverseConnector) Release() error {
@@ -802,18 +1148,34 @@ func (rc *reverseConnector) Release() error {
 }
 
 func (rc *reverseConnector) Close() {
-	rc.closed = true
-	if rc.collectTask != nil {
-		rc.collectTask.Disable()
-	}
-	if rc.listener != nil {
-		_ = rc.listener.Close()
-	}
-	rc.mutex.Lock()
-	defer rc.mutex.Unlock()
-	for _, session := range rc.deviceSessions {
-		_ = session.Close()
-	}
-	rc.deviceSessions = make(map[string]*reverseSession)
-	rc.connDevices = make(map[net.Conn]string)
+	rc.closeOnce.Do(func() {
+		rc.closed.Store(true)
+		if rc.collectTask != nil {
+			rc.collectTask.Disable()
+		}
+		if rc.listener != nil {
+			_ = rc.listener.Close()
+		}
+
+		rc.mutex.Lock()
+		pendingConns := make([]net.Conn, 0, len(rc.pendingConns))
+		for conn := range rc.pendingConns {
+			pendingConns = append(pendingConns, conn)
+		}
+		sessions := rc.deviceSessions
+		rc.pendingConns = make(map[net.Conn]struct{})
+		rc.deviceSessions = make(map[string]*reverseSession)
+		rc.connDevices = make(map[net.Conn]string)
+		rc.mutex.Unlock()
+
+		for _, conn := range pendingConns {
+			_ = conn.Close()
+		}
+		for deviceID, session := range sessions {
+			_ = session.Close()
+			if shadow := driverbox.Shadow(); shadow != nil {
+				_ = shadow.SetOffline(deviceID)
+			}
+		}
+	})
 }

@@ -266,7 +266,7 @@ func (c *connector) sendReadCommand(group *pointGroup) error {
 
 	if c.writeSemaphore.Load() > 0 {
 		c.resetCollectTime(group)
-		driverbox.Log().Warn("modbus connection is writing, ignore collect task!", zap.String("key", c.config.ConnectionKey), zap.Any("semaphore", c.writeSemaphore))
+		driverbox.Log().Warn("modbus connection is writing, ignore collect task!", zap.String("key", c.config.ConnectionKey), zap.Int32("semaphore", c.writeSemaphore.Load()))
 		return nil
 	}
 

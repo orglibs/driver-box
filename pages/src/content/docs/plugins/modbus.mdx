@@ -11,7 +11,7 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 
 - **Modbus RTU**：串口通讯（支持波特率、数据位、校验位、停止位配置）
 - **Modbus TCP**：TCP/IP 网络通讯（正向 Master 模式）
-- **Modbus 反向 TCP（reverse_tcp）**：TCP Server 模式，网关监听端口，接收外部设备（如充电桩、DTU）主动连入，并通过读取设备标识（如 ESN 保持寄存器）或 IP 完成设备绑定，随后作为 Master 发起主动轮询与下发控制
+- **Modbus 反向 TCP（reverse_tcp）**：TCP Server 模式，网关监听端口，接收外部设备（如充电桩、DTU）主动连入；可选择寄存器标识、来源 IP 或单设备绑定，随后作为 Master 发起主动轮询与下发控制
 - **功能码支持**：0x01（读线圈）、0x02（读离散输入）、0x03（读保持寄存器）、0x04（读输入寄存器）、0x05/0x0F（写线圈）、0x06/0x10（写保持寄存器）
 - **批量读取**：自动将相同采集频率和连续地址的点位合并读取
 - **批量写入**：支持批量写入连续地址的保持寄存器
@@ -74,6 +74,8 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 
 在反向模式下，`address` 配置为网关本地监听地址（例如 `:9502` 或 `0.0.0.0:9502`），外部充电桩或 DTU 作为 TCP 客户端连入网关。
 
+`identify.mode` 必须明确选择一种识别方式，不会按其他方式依次尝试。寄存器标识适合设备提供唯一序列号寄存器的场景：
+
 ```json
 {
   "plugin": "modbus",
@@ -85,9 +87,11 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
       "retry": 3,
       "minInterval": 100,
       "identify": {
-        "startAddress": "27",
+        "mode": "modbus_register",
+        "unitID": 1,
+        "startAddress": 27,
         "quantity": 16,
-        "format": "string",
+        "format": "ascii",
         "timeout": 2000
       }
     }
@@ -95,7 +99,8 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 }
 ```
 
-设备列表中，设备 `id` 或其属性 `esn` / `ip` 与探测到的设备身份相匹配：
+寄存器标识固定与设备 `properties.esn` 完全匹配：
+
 ```json
 {
   "id": "charger_01",
@@ -107,14 +112,54 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 }
 ```
 
-| 参数 | 值 | 说明 |
-|------|------|------|
-| address | 0.0.0.0:9502 | 本地监听端口 |
-| mode | reverse_tcp | 反向 TCP 模式 |
-| identify.startAddress | 27 | 身份探测起始寄存器（保持寄存器） |
-| identify.quantity | 16 | 身份探测寄存器数量 |
-| identify.format | string | 探测数据解析格式（如 string） |
-| identify.timeout | 2000 | 探测超时时间（毫秒） |
+来源 IP 识别使用设备属性中配置的 IP 地址或 CIDR 网段，要求来源地址稳定且各设备的匹配范围不重叠；如果设备经同一 NAT 出口连接，通常不能用此方式区分：
+
+```json
+{
+  "identify": {
+    "mode": "source_ip"
+  }
+}
+```
+
+```json
+{
+  "id": "charger_01",
+  "connectionKey": "modbus-reverse-server",
+  "properties": {
+    "unitID": "1",
+    "ip": "192.168.1.21"
+  }
+}
+```
+
+如果一个反向连接只配置一台设备，可以使用单设备绑定：
+
+```json
+{
+  "identify": {
+    "mode": "single_device"
+  }
+}
+```
+
+| 字段 | 类型 | 适用方式 | 说明 |
+|------|------|----------|------|
+| identify.mode | string | 全部 | 必填：`modbus_register`、`source_ip` 或 `single_device` |
+| identify.unitID | uint8 | 寄存器 | 探针使用的 Modbus 从站 ID，默认 1；这是识别探针的地址，不替代设备 `properties.unitID` |
+| identify.startAddress | uint16 | 寄存器 | FC03 保持寄存器探针的起始地址 |
+| identify.quantity | uint16 | 寄存器 | FC03 探针读取数量，范围为 1 到 125 |
+| identify.format | string | 寄存器 | 身份值解析格式：`ascii` 或 `hex`，默认 `ascii` |
+| identify.timeout | uint16 | 寄存器 | 探针超时时间（毫秒），默认 3000 |
+
+设备识别固定读取以下设备属性，不支持自定义匹配字段：
+
+| 设备属性 | 适用方式 | 说明 |
+|----------|----------|------|
+| properties.esn | 寄存器 | 必填且唯一；与 FC03 探测结果完全匹配 |
+| properties.ip | 来源 IP | 必填；填写来源 IP 或 CIDR 网段，各设备范围不能重叠 |
+
+每次连接必须且只能绑定到一个设备。没有匹配或匹配到多个设备时，连接会被拒绝；`single_device` 要求该连接恰好配置一台设备。
 
 ### 配置参数说明
 

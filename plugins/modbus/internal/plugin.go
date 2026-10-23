@@ -99,18 +99,26 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 				rc.Close()
 				continue
 			}
+			if err := rc.validateDeviceBinding(); err != nil {
+				driverbox.Log().Error("invalid modbus reverse device binding", zap.Any("connection", connConfig), zap.Error(err))
+				rc.Close()
+				continue
+			}
 			if !connectionConfig.Enable {
 				driverbox.Log().Warn("modbus reverse connection is disabled, ignore collect task", zap.String("key", key))
 				rc.Close()
 				continue
 			}
 
-			// 启动反向采集任务
+			// 启动反向采集任务和监听循环
 			rc.collectTask, err = rc.initCollectTask()
-			p.connPool[key] = rc
 			if err != nil {
 				driverbox.Log().Error("init reverse connector collect task error", zap.Any("connection", connConfig), zap.Error(err))
+				rc.Close()
+				continue
 			}
+			p.connPool[key] = rc
+			rc.Start()
 			continue
 		}
 

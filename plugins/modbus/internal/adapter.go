@@ -143,7 +143,19 @@ func (c *connector) batchWriteEncode(deviceId string, points []plugin.PointData)
 	}
 	return mergedValues, nil
 }
+
+type registerReader func(unitID uint8, registerType string, address, quantity uint16) ([]uint16, error)
+
 func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, writeValues []*writeValue) (writeValue, error) {
+	return c.getWriteValueWithReader(deviceId, pointData, writeValues, func(unitID uint8, registerType string, address, quantity uint16) ([]uint16, error) {
+		if c.virtual {
+			return c.mockRead(unitID, registerType, address, quantity)
+		}
+		return c.read(unitID, registerType, address, quantity)
+	})
+}
+
+func (c *connector) getWriteValueWithReader(deviceId string, pointData plugin.PointData, writeValues []*writeValue, read registerReader) (writeValue, error) {
 	value := pointData.Value
 	d, ok := driverbox.CoreCache().GetDevice(deviceId)
 	if !ok {
@@ -186,13 +198,7 @@ func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, w
 				if uint64(v) > (1<<ext.BitLen - 1) {
 					return writeValue{}, fmt.Errorf("too large value %v to set in %d bits", v, ext.BitLen)
 				}
-				var uint16s []uint16
-				var err error
-				if c.virtual {
-					uint16s, err = c.mockRead(unitId, string(ext.RegisterType), ext.Address, ext.Quantity)
-				} else {
-					uint16s, err = c.read(unitId, string(ext.RegisterType), ext.Address, ext.Quantity)
-				}
+				uint16s, err := read(unitId, string(ext.RegisterType), ext.Address, ext.Quantity)
 
 				if err != nil {
 					return writeValue{}, fmt.Errorf("read original register error: %v", err)
@@ -234,13 +240,7 @@ func (c *connector) getWriteValue(deviceId string, pointData plugin.PointData, w
 				if uint64(v) > (1<<ext.BitLen - 1) {
 					return writeValue{}, fmt.Errorf("too large value %v to set in %d bits", v, ext.BitLen)
 				}
-				var uint16s []uint16
-				var err error
-				if c.virtual {
-					uint16s, err = c.mockRead(unitId, string(ext.RegisterType), ext.Address, ext.Quantity)
-				} else {
-					uint16s, err = c.read(unitId, string(ext.RegisterType), ext.Address, ext.Quantity)
-				}
+				uint16s, err := read(unitId, string(ext.RegisterType), ext.Address, ext.Quantity)
 
 				if err != nil {
 					return writeValue{}, fmt.Errorf("read original register error: %v", err)
