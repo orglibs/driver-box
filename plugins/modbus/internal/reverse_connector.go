@@ -276,9 +276,6 @@ func newReverseConnector(p *Plugin, cf *ConnectionConfig) (*reverseConnector, er
 	if cf.BatchReadLen == 0 {
 		cf.BatchReadLen = 32
 	}
-	if cf.BatchWriteLen == 0 {
-		cf.BatchWriteLen = 120
-	}
 
 	listener, err := net.Listen("tcp", cf.Address)
 	if err != nil {
@@ -342,12 +339,8 @@ func (rc *reverseConnector) validateDeviceBinding() error {
 		return nil
 	}
 
-	property := ""
 	switch identify.Mode {
-	case identifyModeModbusRegister:
-		property = "esn"
-	case identifyModeSourceIP:
-		property = "ip"
+	case identifyModeModbusRegister, identifyModeSourceIP:
 	default:
 		return fmt.Errorf("unsupported identify.mode %q", identify.Mode)
 	}
@@ -365,20 +358,20 @@ func (rc *reverseConnector) validateDeviceBinding() error {
 	var ipBindings []ipBinding
 	for _, deviceID := range deviceIDs {
 		device := rc.devicesMeta[deviceID]
-		value := device.Properties[property]
+		value := device.Properties["identifyValue"]
 		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("device %q has no properties.%s value for reverse identification", deviceID, property)
+			return fmt.Errorf("device %q has no properties.identifyValue for reverse identification", deviceID)
 		}
 		if identify.Mode == identifyModeModbusRegister {
 			if previous, exists := seenValues[value]; exists {
-				return fmt.Errorf("devices %q and %q share properties.esn value %q", previous, deviceID, value)
+				return fmt.Errorf("devices %q and %q share properties.identifyValue %q", previous, deviceID, value)
 			}
 			seenValues[value] = deviceID
 		}
 		if identify.Mode == identifyModeSourceIP {
 			network, err := parseIdentifyIPRange(value)
 			if err != nil {
-				return fmt.Errorf("device %q has invalid properties.ip value %q: %w", deviceID, value, err)
+				return fmt.Errorf("device %q has invalid properties.identifyValue IP range %q: %w", deviceID, value, err)
 			}
 			for _, previous := range ipBindings {
 				if ipRangesOverlap(previous.network, network) {
@@ -556,11 +549,11 @@ func (rc *reverseConnector) identifyDevice(session *reverseSession) (string, err
 
 		var matches []string
 		for deviceID, device := range devicesMeta {
-			if device.Properties["esn"] == ident {
+			if device.Properties["identifyValue"] == ident {
 				matches = append(matches, deviceID)
 			}
 		}
-		return resolveUniqueDevice(matches, fmt.Sprintf("properties.esn value %q", ident))
+		return resolveUniqueDevice(matches, fmt.Sprintf("properties.identifyValue value %q", ident))
 
 	case identifyModeSourceIP:
 		remoteIP, err := identifyRemoteIP(session.conn.RemoteAddr())
@@ -569,9 +562,9 @@ func (rc *reverseConnector) identifyDevice(session *reverseSession) (string, err
 		}
 		var matches []string
 		for deviceID, device := range devicesMeta {
-			network, err := parseIdentifyIPRange(device.Properties["ip"])
+			network, err := parseIdentifyIPRange(device.Properties["identifyValue"])
 			if err != nil {
-				return "", fmt.Errorf("device %q has invalid IP match value: %w", deviceID, err)
+				return "", fmt.Errorf("device %q has invalid properties.identifyValue IP range: %w", deviceID, err)
 			}
 			if network.Contains(remoteIP) {
 				matches = append(matches, deviceID)

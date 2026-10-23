@@ -152,7 +152,7 @@ func TestReverseConnector_HandshakeAndCollect(t *testing.T) {
 	dev := config.Device{
 		ID: "charger_01",
 		Properties: map[string]string{
-			"esn": "HW_PILE_001",
+			"identifyValue": "HW_PILE_001",
 		},
 	}
 	rc.addDevice(model, dev)
@@ -239,7 +239,7 @@ func TestReverseConnector_KickOffStaleConnection(t *testing.T) {
 	rc.addDevice(config.DeviceModel{}, config.Device{
 		ID: "charger_02",
 		Properties: map[string]string{
-			"esn": "ESN_RECONNECT_TEST",
+			"identifyValue": "ESN_RECONNECT_TEST",
 		},
 	})
 	rc.Start()
@@ -314,7 +314,7 @@ func TestReverseConnector_IdentifyUsesConfiguredUnitID(t *testing.T) {
 			Format:       "ascii",
 		}},
 		devicesMeta: map[string]config.Device{
-			"charger_07": {ID: "charger_07", Properties: map[string]string{"esn": "PILE-7"}},
+			"charger_07": {ID: "charger_07", Properties: map[string]string{"identifyValue": "PILE-7"}},
 		},
 	}
 	session := &reverseSession{conn: serverConn, timeout: time.Second}
@@ -370,8 +370,8 @@ func TestReverseConnector_IdentifyBySourceIP(t *testing.T) {
 			Mode: identifyModeSourceIP,
 		}},
 		devicesMeta: map[string]config.Device{
-			"charger_10": {ID: "charger_10", Properties: map[string]string{"ip": "10.20.0.0/16"}},
-			"charger_11": {ID: "charger_11", Properties: map[string]string{"ip": "10.21.0.8"}},
+			"charger_10": {ID: "charger_10", Properties: map[string]string{"identifyValue": "10.20.0.0/16"}},
+			"charger_11": {ID: "charger_11", Properties: map[string]string{"identifyValue": "10.21.0.8"}},
 		},
 	}
 	session := &reverseSession{conn: remoteAddrConn{
@@ -396,8 +396,8 @@ func TestReverseConnector_IdentifyRejectsMultipleMatches(t *testing.T) {
 	rc := &reverseConnector{
 		config: &ConnectionConfig{Identify: &IdentifyConfig{Mode: identifyModeSourceIP}},
 		devicesMeta: map[string]config.Device{
-			"charger_10": {ID: "charger_10", Properties: map[string]string{"ip": "10.20.0.0/16"}},
-			"charger_11": {ID: "charger_11", Properties: map[string]string{"ip": "10.20.3.4"}},
+			"charger_10": {ID: "charger_10", Properties: map[string]string{"identifyValue": "10.20.0.0/16"}},
+			"charger_11": {ID: "charger_11", Properties: map[string]string{"identifyValue": "10.20.3.4"}},
 		},
 	}
 	session := &reverseSession{conn: remoteAddrConn{
@@ -480,32 +480,36 @@ func TestReverseConnector_ValidateDeviceBinding(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "register requires esn property",
-			mode:    identifyModeModbusRegister,
-			devices: map[string]config.Device{"charger_1": {ID: "charger_1"}},
-			wantErr: true,
-		},
-		{
-			name: "register values must be unique",
+			name: "register requires identifyValue property",
 			mode: identifyModeModbusRegister,
 			devices: map[string]config.Device{
-				"charger_1": {ID: "charger_1", Properties: map[string]string{"esn": "same"}},
-				"charger_2": {ID: "charger_2", Properties: map[string]string{"esn": "same"}},
+				"charger_1": {ID: "charger_1", Properties: map[string]string{"esn": "legacy-value"}},
 			},
 			wantErr: true,
 		},
 		{
-			name:    "source ip requires ip property",
-			mode:    identifyModeSourceIP,
-			devices: map[string]config.Device{"charger_1": {ID: "charger_1"}},
+			name: "register identifyValues must be unique",
+			mode: identifyModeModbusRegister,
+			devices: map[string]config.Device{
+				"charger_1": {ID: "charger_1", Properties: map[string]string{"identifyValue": "same"}},
+				"charger_2": {ID: "charger_2", Properties: map[string]string{"identifyValue": "same"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "source ip requires identifyValue property",
+			mode: identifyModeSourceIP,
+			devices: map[string]config.Device{
+				"charger_1": {ID: "charger_1", Properties: map[string]string{"ip": "192.168.1.21"}},
+			},
 			wantErr: true,
 		},
 		{
 			name: "source ip ranges must not overlap",
 			mode: identifyModeSourceIP,
 			devices: map[string]config.Device{
-				"charger_1": {ID: "charger_1", Properties: map[string]string{"ip": "10.20.0.0/16"}},
-				"charger_2": {ID: "charger_2", Properties: map[string]string{"ip": "10.20.3.4"}},
+				"charger_1": {ID: "charger_1", Properties: map[string]string{"identifyValue": "10.20.0.0/16"}},
+				"charger_2": {ID: "charger_2", Properties: map[string]string{"identifyValue": "10.20.3.4"}},
 			},
 			wantErr: true,
 		},
@@ -725,5 +729,13 @@ func TestMergeReverseWriteValues(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got[0].Value, []uint16{1}) || !reflect.DeepEqual(got[2].Value, []uint16{2}) {
 		t.Fatalf("holding writes across coil write were merged: %#v", got)
+	}
+
+	got = mergeReverseWriteValues([]*writeValue{
+		{DeviceId: "charger_01", unitID: 1, RegisterType: HoldingRegister, Address: 10, Value: []uint16{1}},
+		{DeviceId: "charger_01", unitID: 1, RegisterType: HoldingRegister, Address: 11, Value: []uint16{2}},
+	}, 0)
+	if len(got) != 2 || !reflect.DeepEqual(got[0].Value, []uint16{1}) || !reflect.DeepEqual(got[1].Value, []uint16{2}) {
+		t.Fatalf("writes with batchWriteLen=0 = %#v, want two separate writes", got)
 	}
 }
