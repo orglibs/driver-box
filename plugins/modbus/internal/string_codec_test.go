@@ -35,6 +35,7 @@ func TestNormalizeModbusText(t *testing.T) {
 		{"\x00 \x00 A \x00 \x00", "A"},
 		{" A  B ", "A  B"},
 		{" A\x00B ", "A\x00B"},
+		{" PILE-1\t\r\n\x00 ", "PILE-1\t\r\n"},
 		{" \tA\n\u3000 ", "\tA\n\u3000"},
 		{"  ", ""}, {"\x00\x00", ""}, {"", ""}, {"中文", "中文"},
 	} {

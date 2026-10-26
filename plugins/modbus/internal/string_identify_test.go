@@ -14,11 +14,16 @@ func TestStringIdentityNormalization(t *testing.T) {
 		valid         bool
 	}{
 		{"PILE-1", " PILE-1\x00", false},
+		{"PILE-1", "PILE-1\t\r\n", false},
+		{"PILE-1", " PILE-1\x00 \r\x00\n\t ", false},
 		{"PILE-1", "PILE-2", true},
 		{"PILE-1", "pile-1", true},
 		{" \x00 ", "PILE-2", false},
+		{" \t\r\n\x00 ", "PILE-2", false},
 		{"\xff", "PILE-2", false},
 		{"\tPILE-1\n", "PILE-1", true},
+		{"PILE\t1", "PILE1", true},
+		{"PILE\r\n1", "PILE1", true},
 	} {
 		devices := map[string]config.Device{"A": {ID: "A", Properties: map[string]string{"identifyValue": tt.first}}, "B": {ID: "B", Properties: map[string]string{"identifyValue": tt.second}}}
 		rc := &reverseConnector{config: &ConnectionConfig{Identify: &IdentifyConfig{Mode: identifyModeModbusRegister, Format: "ascii"}}, devicesMeta: devices}
@@ -39,11 +44,18 @@ func TestStringIdentityProbe(t *testing.T) {
 		valid                    bool
 	}{
 		{"padded", "ascii", " PILE-1\x00", []uint16{0x2050, 0x494c, 0x452d, 0x3100}, true},
+		{"trailing controls", "ascii", "PILE-1", []uint16{0x5049, 0x4c45, 0x2d31, 0x090d, 0x0a00}, true},
+		{"configured trailing controls", "ascii", " PILE-1\x00 \t\r\n", []uint16{0x5049, 0x4c45, 0x2d31}, true},
+		{"alternating padding and controls", "ascii", "PILE-1", []uint16{0x5049, 0x4c45, 0x2d31, 0x0020, 0x0d00, 0x0a09, 0x2000}, true},
+		{"leading tab preserved", "ascii", "PILE-1", []uint16{0x0950, 0x494c, 0x452d, 0x3100}, false},
+		{"internal controls preserved", "ascii", "PILE\r\n1", []uint16{0x5049, 0x4c45, 0x0d0a, 0x3100}, true},
 		{"UTF8", "ascii", "中文", []uint16{0xe4b8, 0xade6, 0x9687}, true},
 		{"empty", "ascii", "PILE-1", []uint16{0, 0x2020}, false},
+		{"only padding and controls", "ascii", "PILE-1", []uint16{0x2009, 0x0d0a, 0x0020}, false},
 		{"invalid UTF8", "ascii", "PILE-1", []uint16{0xffff}, false},
 		{"case sensitive", "ascii", "pile-1", []uint16{0x5049, 0x4c45, 0x2d31}, false},
 		{"hex unchanged", "hex", "ffff0000", []uint16{0xffff, 0}, true},
+		{"hex control bytes unchanged", "hex", "090d0a00", []uint16{0x090d, 0x0a00}, true},
 		{"hex case unchanged", "hex", "FFFF0000", []uint16{0xffff, 0}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,7 +80,7 @@ func TestStringIdentityProbe(t *testing.T) {
 }
 
 func TestStringIdentityFailureClosesPendingConnection(t *testing.T) {
-	for _, registers := range [][]uint16{{0xffff}, {0}} {
+	for _, registers := range [][]uint16{{0xffff}, {0}, {0x090d}} {
 		server, client := net.Pipe()
 		rc := &reverseConnector{config: &ConnectionConfig{Timeout: 500, Identify: &IdentifyConfig{Mode: identifyModeModbusRegister, Format: "ascii", UnitID: 1, StartAddress: 27, Quantity: 1}}, pendingConns: map[net.Conn]struct{}{server: {}}, devicesMeta: map[string]config.Device{"A": {ID: "A", Properties: map[string]string{"identifyValue": "PILE-1"}}}}
 		slave := &stringSlave{}

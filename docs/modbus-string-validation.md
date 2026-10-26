@@ -83,6 +83,23 @@ npm install --package-lock=false --no-audit --no-fund --fetch-retries=0 --fetch-
 
 ## 兼容性与剩余事项
 
-显式 String quantity 从原先被忽略变为生效；缺省仍为单寄存器。String 改用地址递增顺序，依赖旧整体反转行为的配置需迁移；正反向与 ASCII 身份统一首尾清理并拒绝非法 UTF-8，规范化后重复身份需清理。其他数值类型固定宽度、端序参数及数值加工语义保持原有定义。
+显式 String quantity 从原先被忽略变为生效；缺省仍为单寄存器。String 改用地址递增顺序，依赖旧整体反转行为的配置需迁移；正反向 String 统一清理首尾 NUL/ASCII 空格并拒绝非法 UTF-8；ASCII 身份还兼容旧规则清理末尾制表符、回车和换行，规范化后重复身份需清理。其他数值类型固定宽度、端序参数及数值加工语义保持原有定义。
 
 自动模拟测试通过，厂家联调未执行；伪终端测试不是实际串口厂家联调。完整框架回归仍需先修复上述两个基线问题，文档站构建仍需修复现有 Sharp 构建环境。未创建发布版本，未升级 zggatewayv2；网关数量透传、字段存在性记录、预检和北向链路测试属于后续工作。
+
+## 2026-10-26 身份尾部控制字符兼容调整
+
+根据后续确认，ASCII 身份识别恢复清理末尾制表符（`\t`）、回车（`\r`）和换行（`\n`），支持与 NUL/ASCII 空格混合交替的尾部填充。探针结果与配置 `properties.identifyValue` 共用 `normalizeModbusIdentity`，在规范化后检查空值、唯一性和精确匹配；不原地修改设备属性。中间内容和开头的控制字符保留，普通 String 遥测继续仅清理首尾 NUL/ASCII 空格，hex 规则不变。
+
+新增回归覆盖设备返回尾部控制字符、配置身份带尾部控制字符、交替填充、规范化后重复/空身份、空探针关闭待识别连接、保留中间内容和普通 String 尾部控制字符、hex 控制字节保持原样。
+
+本轮完整 Modbus race 命令因环境拒绝本机 TCP 监听（`socket: operation not permitted`）未能通过；未将权限限制计作协议失败或测试通过。以下命令排除三个依赖 TCP 监听的顶层测试，其余测试（含 net.Pipe 身份探针、codec 和 Linux RTU 伪终端回归）通过：
+
+```bash
+GOCACHE=/tmp/driverbox-string-build-cache go test -mod=readonly -race -count=1 -timeout 90s -skip '^(TestReverseConnector_(HandshakeAndCollect|KickOffStaleConnection)|TestModbusStringIntegration)$' ./plugins/modbus/...
+GOCACHE=/tmp/driverbox-string-build-cache go vet -mod=readonly ./plugins/modbus/...
+GOCACHE=/tmp/driverbox-string-build-cache go build -mod=readonly -o /tmp/driverbox-string-identity-driver-box .
+git diff --check
+```
+
+上述静态检查和构建也通过；TCP 监听集成测试仍需在允许监听的环境重跑。

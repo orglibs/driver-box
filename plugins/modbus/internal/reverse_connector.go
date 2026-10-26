@@ -364,7 +364,7 @@ func (rc *reverseConnector) validateDeviceBinding() error {
 		value := device.Properties["identifyValue"]
 		if identify.Mode == identifyModeModbusRegister && identify.Format != "hex" {
 			var err error
-			value, err = normalizeModbusText(value)
+			value, err = normalizeModbusIdentity(value)
 			if err != nil {
 				return fmt.Errorf("device %q properties.identifyValue: %w", deviceID, err)
 			}
@@ -513,6 +513,16 @@ func (rc *reverseConnector) handleIncomingConn(conn net.Conn) {
 		zap.String("remoteAddr", conn.RemoteAddr().String()))
 }
 
+// normalizeModbusIdentity keeps the text validation and padding rules, and
+// preserves legacy ASCII identification by also removing trailing TAB/CR/LF.
+func normalizeModbusIdentity(value string) (string, error) {
+	value, err := normalizeModbusText(value)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(value, "\x00 \t\r\n"), nil
+}
+
 // identifyDevice uses the configured strategy to bind an incoming session to one device.
 func (rc *reverseConnector) identifyDevice(session *reverseSession) (string, error) {
 	if rc.config == nil || rc.config.Identify == nil {
@@ -542,6 +552,9 @@ func (rc *reverseConnector) identifyDevice(session *reverseSession) (string, err
 			ident = sb.String()
 		} else {
 			ident, err = decodeModbusString(regs, false, false)
+			if err == nil {
+				ident, err = normalizeModbusIdentity(ident)
+			}
 			if err != nil {
 				return "", fmt.Errorf("modbus_register probe text: %w", err)
 			}
@@ -558,7 +571,7 @@ func (rc *reverseConnector) identifyDevice(session *reverseSession) (string, err
 		for deviceID, device := range devicesMeta {
 			configured := device.Properties["identifyValue"]
 			if identify.Format != "hex" {
-				configured, err = normalizeModbusText(configured)
+				configured, err = normalizeModbusIdentity(configured)
 				if err != nil || configured == "" {
 					return "", fmt.Errorf("device %q has invalid or empty properties.identifyValue", deviceID)
 				}
