@@ -83,7 +83,8 @@ type Point struct {
 	Duration     string `json:"duration"`
 	Address      uint16
 	RegisterType primaryTable `json:"primaryTable"`
-	//该配置无需设置
+	// Runtime register count: String explicitly parses quantity from Point;
+	// numeric types derive their fixed width and ignore configured quantity.
 	Quantity uint16 `json:"-"`
 	Bit      uint8  `json:"bit"`
 	BitLen   uint8  `json:"bitLen"`

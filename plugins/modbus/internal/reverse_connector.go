@@ -183,6 +183,9 @@ func (s *reverseSession) writeRegister(slaveId uint8, address, value uint16) err
 }
 
 func (s *reverseSession) writeRegisters(slaveId uint8, address uint16, values []uint16) error {
+	if len(values) < 1 || len(values) > 123 || int(address)+len(values) > 65536 {
+		return errors.New("FC16 requires 1–123 registers within the address range")
+	}
 	qty := uint16(len(values))
 	byteCount := uint8(qty * 2)
 	payload := make([]byte, 5+len(values)*2)
@@ -359,7 +362,14 @@ func (rc *reverseConnector) validateDeviceBinding() error {
 	for _, deviceID := range deviceIDs {
 		device := rc.devicesMeta[deviceID]
 		value := device.Properties["identifyValue"]
-		if strings.TrimSpace(value) == "" {
+		if identify.Mode == identifyModeModbusRegister && identify.Format != "hex" {
+			var err error
+			value, err = normalizeModbusText(value)
+			if err != nil {
+				return fmt.Errorf("device %q properties.identifyValue: %w", deviceID, err)
+			}
+		}
+		if value == "" || ((identify.Mode == identifyModeSourceIP || identify.Format == "hex") && strings.TrimSpace(value) == "") {
 			return fmt.Errorf("device %q has no properties.identifyValue for reverse identification", deviceID)
 		}
 		if identify.Mode == identifyModeModbusRegister {
@@ -531,13 +541,10 @@ func (rc *reverseConnector) identifyDevice(session *reverseSession) (string, err
 			}
 			ident = sb.String()
 		} else {
-			// 默认 ascii 格式
-			bytes := make([]byte, len(regs)*2)
-			for i, val := range regs {
-				bytes[i*2] = byte(val >> 8)
-				bytes[i*2+1] = byte(val & 0xFF)
+			ident, err = decodeModbusString(regs, false, false)
+			if err != nil {
+				return "", fmt.Errorf("modbus_register probe text: %w", err)
 			}
-			ident = strings.TrimRight(string(bytes), "\x00 \t\r\n")
 		}
 		if ident == "" {
 			return "", errors.New("modbus_register probe returned an empty identity")
@@ -549,7 +556,14 @@ func (rc *reverseConnector) identifyDevice(session *reverseSession) (string, err
 
 		var matches []string
 		for deviceID, device := range devicesMeta {
-			if device.Properties["identifyValue"] == ident {
+			configured := device.Properties["identifyValue"]
+			if identify.Format != "hex" {
+				configured, err = normalizeModbusText(configured)
+				if err != nil || configured == "" {
+					return "", fmt.Errorf("device %q has invalid or empty properties.identifyValue", deviceID)
+				}
+			}
+			if configured == ident {
 				matches = append(matches, deviceID)
 			}
 		}
@@ -719,19 +733,19 @@ func (rc *reverseConnector) addDevice(model config.DeviceModel, dev config.Devic
 			if group.Duration != duration || group.RegisterType != ext.RegisterType {
 				continue
 			}
-			start := group.Address
-			if start > ext.Address {
-				start = ext.Address
+			start := uint32(group.Address)
+			if start > uint32(ext.Address) {
+				start = uint32(ext.Address)
 			}
-			end := group.Address + group.Quantity
-			if end < ext.Address+ext.Quantity {
-				end = ext.Address + ext.Quantity
+			end := uint32(group.Address) + uint32(group.Quantity)
+			if end < uint32(ext.Address)+uint32(ext.Quantity) {
+				end = uint32(ext.Address) + uint32(ext.Quantity)
 			}
-			if end-start <= rc.config.BatchReadLen {
+			if end <= 65536 && end-start <= readGroupLimit(rc.config, ext.RegisterType) {
 				group.Points = append(group.Points, ext)
 				ok = true
-				group.Address = start
-				group.Quantity = end - start
+				group.Address = uint16(start)
+				group.Quantity = uint16(end - start)
 				break
 			}
 		}
@@ -935,59 +949,66 @@ func (rc *reverseConnector) sendReadCommand(session *reverseSession, deviceId st
 	var batches []plugin.DeviceData
 	for _, point := range group.Points {
 		var value interface{}
-		start := point.Address - group.Address
-		if int(start+point.Quantity) > len(values) {
+		window, err := pointReadWindow(values, group.Address, point)
+		if err != nil {
+			modbusLog().Error("Modbus point decode error", zap.String("deviceId", point.DeviceId), zap.String("pointName", point.Name()), zap.Error(err))
 			continue
 		}
-		rawValues := values[start : start+point.Quantity]
-		reverseUint16s(rawValues)
-		switch point.RegisterType {
-		case Coil, DiscreteInput:
-			value = rawValues[0]
-		case InputRegister, HoldingRegister:
-			switch strings.ToUpper(point.RawType) {
-			case strings.ToUpper(ValueTypeUint16), strings.ToUpper(ValueTypeInt16):
-				out := getBytesFromUint16s(rawValues, point.ByteSwap)
-				val := binary.BigEndian.Uint16(out)
-				if point.BitLen > 0 {
-					value = getBitsFromPosition(val, point.Bit, point.BitLen)
-				} else {
-					if strings.ToUpper(point.RawType) == strings.ToUpper(ValueTypeInt16) {
-						value = int16(val)
-					} else {
-						value = val
-					}
-				}
-			case strings.ToUpper(ValueTypeUint32), strings.ToUpper(ValueTypeInt32), strings.ToUpper(ValueTypeFloat32):
-				out := getBytesFromUint16s(rawValues, point.ByteSwap)
-				out = swapWords(out, point.WordSwap)
-				val := binary.BigEndian.Uint32(out)
-				switch strings.ToUpper(point.RawType) {
-				case strings.ToUpper(ValueTypeUint32):
-					value = val
-				case strings.ToUpper(ValueTypeInt32):
-					value = int32(val)
-				case strings.ToUpper(ValueTypeFloat32):
-					value = math.Float32frombits(val)
-				}
-			case strings.ToUpper(ValueTypeUint64), strings.ToUpper(ValueTypeInt64), strings.ToUpper(ValueTypeFloat64):
-				out := getBytesFromUint16s(rawValues, point.ByteSwap)
-				out = swapWords(out, point.WordSwap)
-				val := binary.BigEndian.Uint64(out)
-				switch strings.ToUpper(point.RawType) {
-				case strings.ToUpper(ValueTypeUint64):
-					value = val
-				case strings.ToUpper(ValueTypeInt64):
-					value = int64(val)
-				case strings.ToUpper(ValueTypeFloat64):
-					value = math.Float64frombits(val)
-				}
-			case strings.ToUpper(ValueTypeString):
-				out := getBytesFromUint16s(rawValues, point.ByteSwap)
-				out = swapWords(out, point.WordSwap)
-				value = strings.TrimRight(string(out), "\x00 ")
-			default:
+		if strings.EqualFold(point.RawType, ValueTypeString) {
+			value, err = decodeModbusString(window, point.ByteSwap, point.WordSwap)
+			if err != nil {
+				modbusLog().Error("Modbus String decode error", zap.String("deviceId", point.DeviceId), zap.String("pointName", point.Name()), zap.Error(err))
 				continue
+			}
+		} else {
+			// Numeric decoding keeps its historical order on a private window.
+			rawValues := append([]uint16(nil), window...)
+			reverseUint16s(rawValues)
+			switch point.RegisterType {
+			case Coil, DiscreteInput:
+				value = rawValues[0]
+			case InputRegister, HoldingRegister:
+				switch strings.ToUpper(point.RawType) {
+				case strings.ToUpper(ValueTypeUint16), strings.ToUpper(ValueTypeInt16):
+					out := getBytesFromUint16s(rawValues, point.ByteSwap)
+					val := binary.BigEndian.Uint16(out)
+					if point.BitLen > 0 {
+						value = getBitsFromPosition(val, point.Bit, point.BitLen)
+					} else {
+						if strings.ToUpper(point.RawType) == strings.ToUpper(ValueTypeInt16) {
+							value = int16(val)
+						} else {
+							value = val
+						}
+					}
+				case strings.ToUpper(ValueTypeUint32), strings.ToUpper(ValueTypeInt32), strings.ToUpper(ValueTypeFloat32):
+					out := getBytesFromUint16s(rawValues, point.ByteSwap)
+					out = swapWords(out, point.WordSwap)
+					val := binary.BigEndian.Uint32(out)
+					switch strings.ToUpper(point.RawType) {
+					case strings.ToUpper(ValueTypeUint32):
+						value = val
+					case strings.ToUpper(ValueTypeInt32):
+						value = int32(val)
+					case strings.ToUpper(ValueTypeFloat32):
+						value = math.Float32frombits(val)
+					}
+				case strings.ToUpper(ValueTypeUint64), strings.ToUpper(ValueTypeInt64), strings.ToUpper(ValueTypeFloat64):
+					out := getBytesFromUint16s(rawValues, point.ByteSwap)
+					out = swapWords(out, point.WordSwap)
+					val := binary.BigEndian.Uint64(out)
+					switch strings.ToUpper(point.RawType) {
+					case strings.ToUpper(ValueTypeUint64):
+						value = val
+					case strings.ToUpper(ValueTypeInt64):
+						value = int64(val)
+					case strings.ToUpper(ValueTypeFloat64):
+						value = math.Float64frombits(val)
+					}
+
+				default:
+					continue
+				}
 			}
 		}
 		pointReadValue := plugin.PointReadValue{
@@ -1124,7 +1145,7 @@ func mergeReverseWriteValues(values []*writeValue, batchWriteLen uint16) []*writ
 		for _, value := range run {
 			if previous != nil && previous.DeviceId == value.DeviceId && previous.unitID == value.unitID &&
 				int(previous.Address)+len(previous.Value) == int(value.Address) &&
-				uint16(len(previous.Value)+len(value.Value)) <= batchWriteLen {
+				len(previous.Value)+len(value.Value) <= int(batchWriteLen) {
 				previous.Value = append(previous.Value, value.Value...)
 				continue
 			}

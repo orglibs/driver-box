@@ -199,6 +199,10 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 
 每次连接必须且只能绑定到一个设备。没有匹配或匹配到多个设备时，连接会被拒绝；`single_device` 要求该连接恰好配置一台设备。
 
+`identify.format: "ascii"` 使用 UTF-8 校验并兼容 ASCII：按地址递增顺序读取，每个寄存器高字节在前，清理首尾 NUL（`0x00`）和 ASCII 空格（`0x20`），保留中间 NUL、空格、制表符和换行。配置的 `properties.identifyValue` 使用相同规范化规则，再做大小写敏感的精确匹配；规范化后为空、非法 UTF-8 或重复的身份配置会被拒绝。例如 `"PILE-1"` 与 `" PILE-1\u0000"` 属于重复身份。探针返回空文本或非法 UTF-8 时，关闭待识别连接。
+
+`hex` 保留原有十六进制生成与匹配规则。探针 `quantity` 独立于普通点位 `quantity` 和 `batchReadLen`；识别读取不会自动成为 ESN 遥测上报。
+
 ### 配置参数说明
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -213,7 +217,7 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 | retry | int | 3 | 重试次数 |
 | minInterval | uint16 | 100 | 最小采集间隔（毫秒） |
 | scanInterval | string | `1s` | 连接采集任务扫描周期。仅控制调度器检查频率，不改变点位的 `duration` 采集周期 |
-| batchReadLen | uint16 | 32 | 批量读取寄存器最大数量 |
+| batchReadLen | uint16 | 32 | 批量读取合并上限；FC03/FC04 的有效上限为此值与 125 的较小值，0 按默认 32 处理；线圈沿用原规则 |
 | batchWriteLen | uint16 | 0 | 连续保持寄存器写入的最大合并长度；默认不合并，设置为正值后才合并连续写入 |
 | virtual | bool | false | 是否启用虚拟模式（测试用） |
 
@@ -248,7 +252,8 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 | rawType | string | 是 | 原始数据类型 |
 | duration | string | 否 | 采集周期，默认 `1s` |
 | byteSwap | bool | 否 | 是否字节交换 |
-| wordSwap | bool | 否 | 是否字交换（32 位及以上数据类型） |
+| wordSwap | bool | 否 | 数值类型沿用原字交换定义；String 交换相邻寄存器对，末尾单个寄存器不动 |
+| quantity | 整数 | String 建议显式填写 | String 的 16 位寄存器数量；缺省为 1，显式 0/null 非法；其他原始类型仍按固定宽度推导 |
 | bit | uint8 | 否 | 位偏移（仅位操作） |
 | bitLen | uint8 | 否 | 位长度（仅位操作） |
 | multiWrite | bool | 否 | 是否强制使用多寄存器写接口 |
@@ -285,7 +290,78 @@ Modbus 设备需要在 `properties` 中配置从站 ID：
 | Int64 | 有符号 64 位整数 | 4 |
 | Float32 | 单精度浮点数 | 2 |
 | Float64 | 双精度浮点数 | 4 |
-| String | 字符串 | 自定义（默认 1） |
+| String | UTF-8 字符串，兼容 ASCII | `quantity`，只读 1–125，可写 1–123，缺省为 1 |
+
+### 多寄存器 String
+
+TCP、RTU、RTU over TCP、反向 TCP 使用相同 String 编解码规则。以下对象分别放在 `deviceModels[].devicePoints[]` 中；软件版本地址 `3`、长度 `24` 和 ESN 地址 `27`、长度 `16` 是示例设备的约定，其他设备应以厂家点表为准：
+
+```json
+[
+  {
+    "name": "softwareVersion",
+    "description": "软件版本",
+    "primaryTable": "HOLDING_REGISTER",
+    "startAddress": "3",
+    "rawType": "String",
+    "quantity": 24,
+    "byteSwap": false,
+    "wordSwap": false,
+    "valueType": "string",
+    "readWrite": "R",
+    "duration": "10s",
+    "reportMode": "change"
+  },
+  {
+    "name": "esn",
+    "description": "设备编码",
+    "primaryTable": "HOLDING_REGISTER",
+    "startAddress": "27",
+    "rawType": "String",
+    "quantity": 16,
+    "byteSwap": false,
+    "wordSwap": false,
+    "valueType": "string",
+    "readWrite": "R",
+    "duration": "10s",
+    "reportMode": "change"
+  }
+]
+```
+
+`quantity: 16` 表示 32 字节容量，不表示 32 个任意字符。UTF-8 多字节字符可以跨寄存器边界；写入按规范化后的字节长度检查容量，超长返回错误，不截断字符。无需 `stringOptions`、`encoding` 或 `stringLength`。
+
+String 配置要求：
+
+- `rawType` 大小写不敏感，`valueType` 必须为 `"string"`，`readWrite` 必须为 `"R"`、`"W"` 或 `"RW"`。
+- 只允许保持寄存器和输入寄存器；输入寄存器仅允许 `"R"`。线圈和离散输入不支持 String。
+- `quantity` 必须为 JSON 非负整数，实际范围只读 1–125、可写 1–123。0、null、负数、小数、字符串、布尔、数组和溢出值均拒绝；只有字段缺省时才兼容为 1。
+- 换算后的 `startAddress + quantity` 不得超过 65536，允许恰好到达 65536。String 支持末端十进制地址 50000–65535；使用 `d` 后缀或 `0x` 可明确指定物理地址，其他既有 PLC 地址记法仍有效。
+- `scale`、`decimals`、`bit`、`bitLen` 只能缺省或为数值 0；String 不执行数值缩放或位提取。
+- 可读 String 的完整长度不得超过有效 `batchReadLen`。例如长度 24 配上限 16 会拒绝所属连接并提示调大上限；长度 125 要求 `batchReadLen` 至少为 125。同一 String 不拆成多个读取请求。
+
+默认顺序是寄存器地址从低到高，每个寄存器高字节在前。`byteSwap` 交换每个寄存器内部两字节；`wordSwap` 交换相邻寄存器对，末尾单个不动。两种交换独立组合，并作用于写入时完整的补零容量：
+
+| 寄存器 | byteSwap | wordSwap | 解码文本 |
+|--------|----------|----------|----------|
+| `4142 4344 4546 4748` | false | false | `ABCDEFGH` |
+| 同上 | true | false | `BADCFEHG` |
+| 同上 | false | true | `CDABGHEF` |
+| 同上 | true | true | `DCBAHGFE` |
+| `4142 4344 4546` | false | true | `CDABEF` |
+| `4142` | false | true | `AB` |
+
+字节顺序转换后严格校验 UTF-8，再去掉首尾 NUL/ASCII 空格；写入也使用同样清理规则。中间的 NUL 和重复空格保持原样，JSON 输出正常转义 NUL；制表符、换行、全角空格等其他空白保留。全 NUL/空格解码为有效空字符串，可覆盖旧 Shadow 并触发变化上报。GBK、UTF-16、长度前缀、首个 NUL 截断均不支持；非法 UTF-8 返回明确错误，不猜测编码或生成替换字符。
+
+初始化会在创建连接、反向监听器和采集任务前检查该连接绑定的所有 String 点位（包括只写点位）；错误日志包含连接、模型、设备和点位信息，并拒绝该连接，其他合法连接继续初始化。插件 `Initialize` 没有 error 返回值，因此这不等同于网关整体启动失败。
+
+采集中的非法 UTF-8 或点位窗口越界按点位记录并跳过，其他合法点位继续批量导出。失败的 String 不覆盖旧 Shadow，不关闭有效会话或触发传输层重试；后续合法采样可恢复。
+
+### String 升级兼容性
+
+原版本已有 String 读写分支，但点表 `quantity` 被忽略，实际通常只有一个寄存器。本次显式长度开始生效，缺省仍为 1；String 改用地址递增顺序，依赖旧整体反转行为的配置需要迁移。正反向采集和 ASCII 身份识别统一清理首尾填充，并拒绝非法 UTF-8；规范化后重复的身份值需清理。数值类型的端序、固定宽度、缩放和控制含义保持原样；重叠点位的读取结果不再受点表顺序影响。
+
+网关可增加业务字段 `kind: "string"` 和 `no`，但 driver-box 不解释这些字段。本次不升级网关依赖；网关仍需单独透传长度并做字段存在性、类型和范围预检。
 
 ### 地址格式说明
 
@@ -306,6 +382,7 @@ Modbus 设备需要在 `properties` 中配置从站 ID：
 - 相同 `duration` 的点位分为一组
 - 相同 `primaryTable` 的点位才能同组
 - 地址区间长度不超过 `batchReadLen` 时合并，超过则拆分为新组
+- FC03/FC04 的合并范围还不得超过 125 个寄存器；String 保持完整，FC01/FC02 不套用此上限
 - 减少通讯次数，提高采集效率
 
 ## 写操作
@@ -315,6 +392,8 @@ Modbus 设备需要在 `properties` 中配置从站 ID：
 - 写操作后 `minInterval` 时间内，读任务继续避让
 - 支持位操作：写入时自动合并同地址的位操作
 - 失败自动重试，次数由 `retry` 参数控制
+- String 写入返回恰好 `quantity` 个寄存器，短文本对剩余容量补零，清除旧内容；单寄存器默认 FC06，`multiWrite: true` 强制 FC16，多寄存器采用 FC16
+- FC16 单次最多 123 个寄存器，合并后的请求也遵守此上限。`batchWriteLen` 只是合并阈值；小于单个合法 String 长度时独立发送，不拆分。只写 String 不受 `batchReadLen` 限制
 
 ## 虚拟模式
 
@@ -414,3 +493,5 @@ graph TB
 - 正向连接器：`plugins/modbus/internal/connector.go`
 - 反向连接器：`plugins/modbus/internal/reverse_connector.go`
 - 数据模型：`plugins/modbus/internal/model.go`
+- String 公共编解码：`plugins/modbus/internal/string_codec.go`
+- String 严格配置校验：`plugins/modbus/internal/string_config.go`

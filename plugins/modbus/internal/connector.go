@@ -163,20 +163,20 @@ func (c *connector) createPointGroup(conf *ConnectionConfig, model config.Device
 			}
 
 			//如果ext和group中的其他addres区间长度不超过maxLen，则添加到group中
-			start := group.Address
-			if start > ext.Address {
-				start = ext.Address
+			start := uint32(group.Address)
+			if start > uint32(ext.Address) {
+				start = uint32(ext.Address)
 			}
-			end := group.Address + group.Quantity
-			if end < ext.Address+ext.Quantity {
-				end = ext.Address + ext.Quantity
+			end := uint32(group.Address) + uint32(group.Quantity)
+			if end < uint32(ext.Address)+uint32(ext.Quantity) {
+				end = uint32(ext.Address) + uint32(ext.Quantity)
 			}
 			//超过最大长度，拆成新的一组
-			if end-start <= conf.BatchReadLen {
+			if end <= 65536 && end-start <= readGroupLimit(conf, ext.RegisterType) {
 				group.Points = append(group.Points, ext)
 				ok = true
-				group.Address = start
-				group.Quantity = end - start
+				group.Address = uint16(start)
+				group.Quantity = uint16(end - start)
 				break
 			}
 		}
@@ -285,58 +285,68 @@ func (c *connector) sendReadCommand(group *pointGroup) error {
 	var batches []plugin.DeviceData
 	for _, point := range group.Points {
 		var value interface{}
-		start := point.Address - group.Address
-		rawValues := values[start : start+point.Quantity]
-		reverseUint16s(rawValues)
-		switch point.RegisterType {
-		case Coil, DiscreteInput: // 线圈和离散都是单个长度，直接返回值即可
-			value = rawValues[0]
-		case InputRegister, HoldingRegister: // 输入寄存器和保持寄存器需要根据大小端还有bit位进行处理
-			switch strings.ToUpper(point.RawType) {
-			case strings.ToUpper(ValueTypeUint16), strings.ToUpper(ValueTypeInt16):
-				out := getBytesFromUint16s(rawValues, point.ByteSwap)
-				val := binary.BigEndian.Uint16(out)
-				// 根据bit位读取数据
-				if point.BitLen > 0 {
-					value = getBitsFromPosition(val, point.Bit, point.BitLen)
-				} else {
-					if strings.ToUpper(point.RawType) == strings.ToUpper(ValueTypeInt16) {
-						value = int16(val)
-					} else {
-						value = val
-					}
-				}
-			case strings.ToUpper(ValueTypeUint32), strings.ToUpper(ValueTypeInt32), strings.ToUpper(ValueTypeFloat32):
-				out := getBytesFromUint16s(rawValues, point.ByteSwap)
-				out = swapWords(out, point.WordSwap)
-				val := binary.BigEndian.Uint32(out)
-				switch strings.ToUpper(point.RawType) {
-				case strings.ToUpper(ValueTypeUint32):
-					value = val
-				case strings.ToUpper(ValueTypeInt32):
-					value = int32(val)
-				case strings.ToUpper(ValueTypeFloat32):
-					value = math.Float32frombits(val)
-				}
-			case strings.ToUpper(ValueTypeUint64), strings.ToUpper(ValueTypeInt64), strings.ToUpper(ValueTypeFloat64):
-				out := getBytesFromUint16s(rawValues, point.ByteSwap)
-				out = swapWords(out, point.WordSwap)
-				val := binary.BigEndian.Uint64(out)
-				switch strings.ToUpper(point.RawType) {
-				case strings.ToUpper(ValueTypeUint64):
-					value = val
-				case strings.ToUpper(ValueTypeInt64):
-					value = int32(val)
-				case strings.ToUpper(ValueTypeFloat64):
-					value = math.Float64frombits(val)
-				}
-			case strings.ToUpper(ValueTypeString):
-				out := getBytesFromUint16s(rawValues, point.ByteSwap)
-				out = swapWords(out, point.WordSwap)
-				value = string(out)
-			default:
-				driverbox.Log().Error(fmt.Sprintf("unsupported raw type: %v", point))
+		window, err := pointReadWindow(values, group.Address, point)
+		if err != nil {
+			modbusLog().Error("Modbus point decode error", zap.String("deviceId", point.DeviceId), zap.String("pointName", point.Name()), zap.Error(err))
+			continue
+		}
+		if strings.EqualFold(point.RawType, ValueTypeString) {
+			value, err = decodeModbusString(window, point.ByteSwap, point.WordSwap)
+			if err != nil {
+				modbusLog().Error("Modbus String decode error", zap.String("deviceId", point.DeviceId), zap.String("pointName", point.Name()), zap.Error(err))
 				continue
+			}
+		} else {
+			// Numeric decoding keeps its historical order on a private window.
+			rawValues := append([]uint16(nil), window...)
+			reverseUint16s(rawValues)
+			switch point.RegisterType {
+			case Coil, DiscreteInput: // 线圈和离散都是单个长度，直接返回值即可
+				value = rawValues[0]
+			case InputRegister, HoldingRegister: // 输入寄存器和保持寄存器需要根据大小端还有bit位进行处理
+				switch strings.ToUpper(point.RawType) {
+				case strings.ToUpper(ValueTypeUint16), strings.ToUpper(ValueTypeInt16):
+					out := getBytesFromUint16s(rawValues, point.ByteSwap)
+					val := binary.BigEndian.Uint16(out)
+					// 根据bit位读取数据
+					if point.BitLen > 0 {
+						value = getBitsFromPosition(val, point.Bit, point.BitLen)
+					} else {
+						if strings.ToUpper(point.RawType) == strings.ToUpper(ValueTypeInt16) {
+							value = int16(val)
+						} else {
+							value = val
+						}
+					}
+				case strings.ToUpper(ValueTypeUint32), strings.ToUpper(ValueTypeInt32), strings.ToUpper(ValueTypeFloat32):
+					out := getBytesFromUint16s(rawValues, point.ByteSwap)
+					out = swapWords(out, point.WordSwap)
+					val := binary.BigEndian.Uint32(out)
+					switch strings.ToUpper(point.RawType) {
+					case strings.ToUpper(ValueTypeUint32):
+						value = val
+					case strings.ToUpper(ValueTypeInt32):
+						value = int32(val)
+					case strings.ToUpper(ValueTypeFloat32):
+						value = math.Float32frombits(val)
+					}
+				case strings.ToUpper(ValueTypeUint64), strings.ToUpper(ValueTypeInt64), strings.ToUpper(ValueTypeFloat64):
+					out := getBytesFromUint16s(rawValues, point.ByteSwap)
+					out = swapWords(out, point.WordSwap)
+					val := binary.BigEndian.Uint64(out)
+					switch strings.ToUpper(point.RawType) {
+					case strings.ToUpper(ValueTypeUint64):
+						value = val
+					case strings.ToUpper(ValueTypeInt64):
+						value = int32(val)
+					case strings.ToUpper(ValueTypeFloat64):
+						value = math.Float64frombits(val)
+					}
+
+				default:
+					driverbox.Log().Error(fmt.Sprintf("unsupported raw type: %v", point))
+					continue
+				}
 			}
 		}
 		pointReadValue := plugin.PointReadValue{
@@ -630,6 +640,14 @@ func (c *connector) write(wv *writeValue) (err error) {
 }
 
 func convToPointExtend(extends config.Point) (*Point, error) {
+	var stringQuantity uint16
+	if isStringPoint(extends) {
+		var err error
+		stringQuantity, err = validateStringPoint(extends)
+		if err != nil {
+			return nil, err
+		}
+	}
 	extend := new(Point)
 	extend.Point = extends
 	if err := convutil.Struct(extends, extend); err != nil {
@@ -645,11 +663,24 @@ func convToPointExtend(extends config.Point) (*Point, error) {
 	if !ok {
 		return nil, fmt.Errorf("start address missed")
 	}
-	address, err := castModbusAddress(startAddress)
+	var address uint16
+	var err error
+	if stringQuantity != 0 {
+		address, err = stringPointAddress(startAddress)
+	} else {
+		address, err = castModbusAddress(startAddress)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("convert start address error: %s", err.Error())
 	}
 	extend.Address = address
+	if stringQuantity != 0 {
+		if uint32(address)+uint32(stringQuantity) > 65536 {
+			return nil, fmt.Errorf("String startAddress + quantity exceeds 65536")
+		}
+		extend.Quantity = stringQuantity
+		return extend, nil
+	}
 
 	switch extend.RegisterType {
 	case Coil, DiscreteInput: // 线圈及离散输入仅支持读一个
@@ -662,10 +693,6 @@ func convToPointExtend(extends config.Point) (*Point, error) {
 			extend.Quantity = 2
 		case strings.ToUpper(ValueTypeUint64), strings.ToUpper(ValueTypeInt64), strings.ToUpper(ValueTypeFloat64):
 			extend.Quantity = 4
-		case strings.ToUpper(ValueTypeString):
-			if extend.Quantity == 0 {
-				extend.Quantity = 1
-			}
 		default:
 			return nil, fmt.Errorf("unsupported raw type %s", extend.RawType)
 		}

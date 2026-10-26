@@ -130,7 +130,7 @@ func (c *connector) batchWriteEncode(deviceId string, points []plugin.PointData)
 		}
 		//超过批量写支持的字节长度范围
 		batchLen := len(preValue.Value) + len(v.Value)
-		if uint16(batchLen) > c.config.BatchWriteLen {
+		if batchLen > 123 || batchLen > int(c.config.BatchWriteLen) {
 			preValue = v
 			mergedValues = append(mergedValues, v)
 			continue
@@ -389,35 +389,9 @@ func (c *connector) getWriteValueWithReader(deviceId string, pointData plugin.Po
 				binary.BigEndian.Uint16([]byte{out[0], out[1]}),
 			}
 		case strings.ToUpper(ValueTypeString):
-			valueBytes := []byte(valueStr)
-			if len(valueBytes) > int(ext.Quantity*2) {
-				return writeValue{}, fmt.Errorf("too long string [%v] to set in %d registers", valueStr, ext.Quantity)
-			}
-			if ext.ByteSwap {
-				for i := 0; i < len(valueBytes); i += 2 {
-					if i+1 < len(valueBytes) {
-						valueBytes[i], valueBytes[i+1] = valueBytes[i+1], valueBytes[i]
-					}
-				}
-			}
-			if ext.WordSwap {
-				for i := 0; i < len(valueBytes); i += 4 {
-					if i+3 < len(valueBytes) {
-						valueBytes[i], valueBytes[i+1], valueBytes[i+2], valueBytes[i+3] =
-							valueBytes[i+2], valueBytes[i+3], valueBytes[i], valueBytes[i+1]
-					}
-				}
-			}
-			values = make([]uint16, ext.Quantity)
-			for i := 0; i < len(valueBytes); i += 2 {
-				if i+1 < len(valueBytes) {
-					values[i/2] = binary.BigEndian.Uint16(valueBytes[i : i+2])
-				} else {
-					values[i/2] = binary.BigEndian.Uint16([]byte{valueBytes[i], 0})
-				}
-			}
-			for i := 0; i < len(values)/2; i++ {
-				values[i], values[len(values)-1-i] = values[len(values)-1-i], values[i]
+			values, err = encodeModbusString(valueStr, ext.Quantity, ext.ByteSwap, ext.WordSwap)
+			if err != nil {
+				return writeValue{}, fmt.Errorf("device %s point %s: %w", deviceId, pointData.PointName, err)
 			}
 		default:
 			return writeValue{}, fmt.Errorf("unsupported raw type: %v", ext)

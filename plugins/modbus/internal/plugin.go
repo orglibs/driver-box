@@ -75,6 +75,9 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 			continue
 		}
 		connectionConfig.ConnectionKey = key
+		if err := validateConnectionStrings(connectionConfig, config.DeviceModels); err != nil {
+			continue
+		}
 
 		if connectionConfig.Mode == "reverse_tcp" {
 			rc, err := newReverseConnector(p, connectionConfig)
