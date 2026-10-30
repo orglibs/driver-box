@@ -203,12 +203,50 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 
 `hex` 保留原有十六进制生成与匹配规则。探针 `quantity` 独立于普通点位 `quantity` 和 `batchReadLen`；识别读取不会自动成为 ESN 遥测上报。
 
+### 反向 TCP 的 TLS 配置
+
+`reverse_tcp` 支持通过连接参数传入 PEM 文本，无需额外的 TLS 开关。网关是 TLS 服务端，主动连入的设备是 TLS 客户端：
+
+| serverTls | clientTls | 行为 |
+|-----------|-----------|------|
+| 未提供 | 未提供 | 普通 TCP，兼容现有配置 |
+| 提供 | 未提供 | 单向 TLS：设备验证网关 |
+| 提供 | 提供 | 双向 TLS：设备验证网关，网关强制验证设备客户端证书 |
+| 未提供 | 提供 | 配置错误，拒绝初始化该连接 |
+
+`serverTls` 是一个字符串，包含服务端证书链和匹配私钥的**合并 PEM**。证书链按服务端叶证书、各级中间证书的顺序排列，随后放入未加密私钥。`clientTls` 是一个字符串，包含用于验证设备客户端证书的一个或多个可信 CA 证书；设备自己的证书及私钥保存在设备端，不传给网关。
+
+以下为连接对象示意，使用时必须将占位内容替换为完整有效的 PEM。JSON 字符串中的换行使用 `\n` 转义，解析后应为真实换行；不支持把文件路径、PKCS#12 或整个 PEM 的 Base64 编码直接作为字段值：
+
+```json
+{
+  "enable": true,
+  "address": "0.0.0.0:9502",
+  "mode": "reverse_tcp",
+  "serverTls": "-----BEGIN CERTIFICATE-----\n服务端证书内容\n-----END CERTIFICATE-----\n-----BEGIN PRIVATE KEY-----\n服务端私钥内容\n-----END PRIVATE KEY-----\n",
+  "clientTls": "-----BEGIN CERTIFICATE-----\n可信客户端CA证书内容\n-----END CERTIFICATE-----\n",
+  "identify": {
+    "mode": "single_device"
+  }
+}
+```
+
+单向 TLS 时完全省略 `clientTls`；普通 TCP 时完全省略两个 TLS 字段。显式 `null`、空字符串、错误类型、无效证书或不匹配的私钥会使该连接初始化失败，不会回退到普通 TCP 或单向 TLS。其他连接继续按原有策略初始化；插件的初始化接口仍不返回全局启动错误。这两个字段仅用于 `reverse_tcp`，在正向 TCP、RTU 和 RTU over TCP 中提供它们会报错。
+
+最低 TLS 版本为 1.2，同时支持 TLS 1.3。TCP 接入后先进行 TLS 握手，握手有独立的 **5 秒超时**，不使用 Modbus `timeout` 或 `identify.timeout`；超时、纯 TCP 数据或证书验证失败只关闭该待接入连接。握手成功后才执行原有身份识别，只有识别成功才绑定设备或替换旧会话。关闭连接器也会中断尚未完成的握手。正常采集、控制、批量上报和 String 编解码沿用现有流程。
+
+设备应信任网关证书的签发 CA，并验证连接域名或 IP 与服务端证书的 SAN 一致。双向 TLS 的设备证书还需通过可信 CA、有效期和客户端用途校验。TLS 客户端认证不会自动建立证书与 ESN/deviceId 的对应关系，仍按 `identify` 配置选择设备；本功能不实现完整的 Modbus Security 角色授权机制。
+
+`serverTls` 含私钥，Modbus 插件日志只记录连接标识和 TLS 是否启用，不输出 PEM。证书在连接器创建时加载，修改后需重新初始化连接，不支持证书热更新；不要将生产私钥提交到仓库。
+
 ### 配置参数说明
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | address | string | - | TCP 或 RTU over TCP 为远端 `IP:PORT`，RTU 为串口路径，反向 TCP 为本地监听 `[IP]:PORT` |
 | mode | string | - | 连接模式：`tcp`、`rtuovertcp`、`rtu` 或 `reverse_tcp` |
+| serverTls | string | 不提供 | 仅反向 TCP：服务端证书链与匹配私钥的合并 PEM；提供即开启 TLS |
+| clientTls | string | 不提供 | 仅反向 TCP：可信客户端 CA 的 PEM；与 serverTls 同时提供时强制双向 TLS |
 | baudRate | uint | 19200 | RTU 串口波特率；RTU over TCP 模式下用于 RTU 帧时序计算，不配置远端串口 |
 | dataBits | uint | 8 | 数据位（RTU 串口模式） |
 | parity | uint | 0 | 校验位：0(无)、1(奇)、2(偶)，用于 RTU 串口模式 |

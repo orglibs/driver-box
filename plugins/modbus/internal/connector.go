@@ -20,6 +20,9 @@ import (
 )
 
 func newConnector(p *Plugin, cf *ConnectionConfig) (*connector, error) {
+	if cf.ServerTLS != "" || cf.ClientTLS != "" {
+		return nil, errors.New("serverTls and clientTls are only supported in reverse_tcp mode")
+	}
 	if cf.MinInterval == 0 {
 		cf.MinInterval = 100
 	}

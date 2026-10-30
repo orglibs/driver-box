@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -237,6 +238,7 @@ type reverseConnector struct {
 	config    *ConnectionConfig
 	plugin    *Plugin
 	listener  net.Listener
+	tlsConfig *tls.Config
 	closed    atomic.Bool
 	mutex     sync.RWMutex
 	startOnce sync.Once
@@ -267,6 +269,10 @@ func newReverseConnector(p *Plugin, cf *ConnectionConfig) (*reverseConnector, er
 	if err := normalizeIdentifyConfig(cf.Identify); err != nil {
 		return nil, err
 	}
+	tlsConfig, err := reverseTLSConfig(cf)
+	if err != nil {
+		return nil, err
+	}
 	if cf.MinInterval == 0 {
 		cf.MinInterval = 100
 	}
@@ -289,6 +295,7 @@ func newReverseConnector(p *Plugin, cf *ConnectionConfig) (*reverseConnector, er
 		config:            cf,
 		plugin:            p,
 		listener:          listener,
+		tlsConfig:         tlsConfig,
 		deviceSessions:    make(map[string]*reverseSession),
 		pendingConns:      make(map[net.Conn]struct{}),
 		connDevices:       make(map[net.Conn]string),
@@ -473,6 +480,17 @@ func (rc *reverseConnector) untrackPendingConn(conn net.Conn) {
 
 func (rc *reverseConnector) handleIncomingConn(conn net.Conn) {
 	defer rc.untrackPendingConn(conn)
+	if rc.tlsConfig != nil {
+		secured, err := handshakeReverseTLS(conn, rc.tlsConfig, reverseTLSHandshakeTimeout)
+		if err != nil {
+			modbusLog().Warn("modbus reverse TLS handshake rejected",
+				zap.String("connectionKey", rc.config.ConnectionKey),
+				zap.String("remoteAddr", conn.RemoteAddr().String()), zap.Error(err))
+			_ = conn.Close()
+			return
+		}
+		conn = secured
+	}
 
 	timeout := time.Duration(rc.config.Timeout) * time.Millisecond
 	if rc.config.Identify != nil && rc.config.Identify.Timeout > 0 {

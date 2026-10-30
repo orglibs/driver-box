@@ -71,7 +71,7 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 	for key, connConfig := range config.Connections {
 		connectionConfig := new(ConnectionConfig)
 		if err := convutil.Struct(connConfig, connectionConfig); err != nil {
-			driverbox.Log().Error("convert connector config error", zap.Any("connection", connConfig), zap.Error(err))
+			driverbox.Log().Error("convert connector config error", zap.String("connectionKey", key), zap.Error(err))
 			continue
 		}
 		connectionConfig.ConnectionKey = key
@@ -82,7 +82,7 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 		if connectionConfig.Mode == "reverse_tcp" {
 			rc, err := newReverseConnector(p, connectionConfig)
 			if err != nil {
-				driverbox.Log().Error("init reverse connector error", zap.Any("connection", connConfig), zap.Error(err))
+				driverbox.Log().Error("init reverse connector error", zap.String("connectionKey", key), zap.Error(err))
 				continue
 			}
 
@@ -98,12 +98,12 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 
 			if len(rc.devicesMeta) == 0 {
 				_ = driverbox.CoreCache().DeleteConnection(connectionConfig.ConnectionKey)
-				driverbox.Log().Warn("delete idle reverse connection", zap.Any("connection", connConfig))
+				driverbox.Log().Warn("delete idle reverse connection", zap.String("connectionKey", key))
 				rc.Close()
 				continue
 			}
 			if err := rc.validateDeviceBinding(); err != nil {
-				driverbox.Log().Error("invalid modbus reverse device binding", zap.Any("connection", connConfig), zap.Error(err))
+				driverbox.Log().Error("invalid modbus reverse device binding", zap.String("connectionKey", key), zap.Error(err))
 				rc.Close()
 				continue
 			}
@@ -116,7 +116,7 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 			// 启动反向采集任务和监听循环
 			rc.collectTask, err = rc.initCollectTask()
 			if err != nil {
-				driverbox.Log().Error("init reverse connector collect task error", zap.Any("connection", connConfig), zap.Error(err))
+				driverbox.Log().Error("init reverse connector collect task error", zap.String("connectionKey", key), zap.Error(err))
 				rc.Close()
 				continue
 			}
@@ -127,7 +127,7 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 
 		conn, err := newConnector(p, connectionConfig)
 		if err != nil {
-			driverbox.Log().Error("init connector error", zap.Any("connection", connConfig), zap.Error(err))
+			driverbox.Log().Error("init connector error", zap.String("connectionKey", key), zap.Error(err))
 			continue
 		}
 		if conn.virtual {
@@ -157,9 +157,9 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 		if len(conn.devices) == 0 {
 			err = driverbox.CoreCache().DeleteConnection(conn.config.ConnectionKey)
 			if err != nil {
-				driverbox.Log().Error("delete connection error", zap.Any("connection", connConfig), zap.Error(err))
+				driverbox.Log().Error("delete connection error", zap.String("connectionKey", key), zap.Error(err))
 			} else {
-				driverbox.Log().Warn("delete idle connection", zap.Any("connection", connConfig))
+				driverbox.Log().Warn("delete idle connection", zap.String("connectionKey", key))
 			}
 			continue
 		}
@@ -172,7 +172,7 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 		conn.collectTask, err = conn.initCollectTask(connectionConfig)
 		p.connPool[key] = conn
 		if err != nil {
-			driverbox.Log().Error("init connector collect task error", zap.Any("connection", connConfig), zap.Error(err))
+			driverbox.Log().Error("init connector collect task error", zap.String("connectionKey", key), zap.Error(err))
 		}
 	}
 }
