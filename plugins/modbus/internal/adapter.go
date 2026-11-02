@@ -175,6 +175,12 @@ func (c *connector) getWriteValueWithReader(deviceId string, pointData plugin.Po
 		driverbox.Log().Error("error modbus point config", zap.String("deviceId", deviceId), zap.Any("point", pointData.PointName), zap.Error(err))
 		return writeValue{}, err
 	}
+	if offset, _ := p.Offset(); offset != 0 {
+		value, err = convutil.OffsetRawWriteValue(value, p)
+		if err != nil {
+			return writeValue{}, fmt.Errorf("point %s raw write value: %w", pointData.PointName, err)
+		}
+	}
 	var values []uint16
 	switch ext.RegisterType {
 	case Coil: // 线圈固定长度1

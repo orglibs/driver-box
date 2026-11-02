@@ -75,7 +75,7 @@ func (p *Plugin) initNetworks(config config.DeviceConfig) {
 			continue
 		}
 		connectionConfig.ConnectionKey = key
-		if err := validateConnectionStrings(connectionConfig, config.DeviceModels); err != nil {
+		if err := validateConnectionPoints(connectionConfig, config.DeviceModels); err != nil {
 			continue
 		}
 

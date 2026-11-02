@@ -643,6 +643,10 @@ func (c *connector) write(wv *writeValue) (err error) {
 }
 
 func convToPointExtend(extends config.Point) (*Point, error) {
+	_, err := extends.Offset()
+	if err != nil {
+		return nil, err
+	}
 	var stringQuantity uint16
 	if isStringPoint(extends) {
 		var err error
@@ -667,7 +671,6 @@ func convToPointExtend(extends config.Point) (*Point, error) {
 		return nil, fmt.Errorf("start address missed")
 	}
 	var address uint16
-	var err error
 	if stringQuantity != 0 {
 		address, err = stringPointAddress(startAddress)
 	} else {

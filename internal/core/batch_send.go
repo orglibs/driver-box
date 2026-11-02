@@ -158,7 +158,7 @@ func getConnector(deviceId string) (plugin.Connector, error) {
 	p, ok := cache.GetRunningPluginByDevice(deviceId)
 	if !ok {
 		logger.Logger.Error("not found running plugin", zap.String("deviceId", deviceId))
-		return nil, fmt.Errorf("not found running plugin, deviceId: %s ,point: %s", deviceId)
+		return nil, fmt.Errorf("not found running plugin, deviceId: %s", deviceId)
 	}
 	connector, err := p.Connector(deviceId)
 	if err != nil {

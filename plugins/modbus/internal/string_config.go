@@ -100,9 +100,9 @@ func readGroupLimit(conf *ConnectionConfig, table primaryTable) uint32 {
 	return limit
 }
 
-// Validate all bound String points before constructing clients, listeners or tasks.
+// Validate bound String and offset points before constructing clients, listeners or tasks.
 // Initialize has no error result: reject only this connection and log each context.
-func validateConnectionStrings(conf *ConnectionConfig, models []config.DeviceModel) error {
+func validateConnectionPoints(conf *ConnectionConfig, models []config.DeviceModel) error {
 	var firstErr error
 	for _, model := range models {
 		for _, device := range model.Devices {
@@ -110,16 +110,17 @@ func validateConnectionStrings(conf *ConnectionConfig, models []config.DeviceMod
 				continue
 			}
 			for _, point := range model.DevicePoints {
-				if !isStringPoint(point) {
+				_, hasOffset := point["offset"]
+				if !isStringPoint(point) && !hasOffset {
 					continue
 				}
 				ext, err := convToPointExtend(point)
-				if err == nil && point["readWrite"] != "W" && uint32(ext.Quantity) > readGroupLimit(conf, ext.RegisterType) {
+				if err == nil && isStringPoint(point) && point["readWrite"] != "W" && uint32(ext.Quantity) > readGroupLimit(conf, ext.RegisterType) {
 					err = fmt.Errorf("String quantity %d exceeds effective batchReadLen %d; increase batchReadLen", ext.Quantity, readGroupLimit(conf, ext.RegisterType))
 				}
 				if err != nil {
 					context := fmt.Errorf("connectionKey=%s model=%s deviceId=%s pointName=%v: %w", conf.ConnectionKey, model.Name, device.ID, point["name"], err)
-					driverbox.Log().Error("invalid Modbus String point", zap.String("connectionKey", conf.ConnectionKey),
+					driverbox.Log().Error("invalid Modbus point", zap.String("connectionKey", conf.ConnectionKey),
 						zap.String("model", model.Name), zap.String("deviceId", device.ID), zap.Any("pointName", point["name"]), zap.Error(err))
 					if firstErr == nil {
 						firstErr = context

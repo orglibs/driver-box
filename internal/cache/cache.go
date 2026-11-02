@@ -391,7 +391,14 @@ func checkPoint(model *config.Model, point *config.Point) {
 		logger.Logger.Error("point reportMode config error , valid config is: realTime change period", zap.Any("point", point), zap.String("model", model.Name))
 	}
 	//存在精度换算时，点位类型要求float
-	if point.Scale() != 0 && point.Scale() != 1 && valueType != config.ValueType_Float {
+	offset, err := point.Offset()
+	if err != nil {
+		logger.Logger.Error("point offset config error", zap.Error(err), zap.String("pointName", point.Name()), zap.String("modelName", model.Name))
+		return
+	}
+	// Nonzero offset validates scale safely and validates the engineering type
+	// after the full transform. Preserve the old scale check for legacy points.
+	if offset == 0 && point.Scale() != 0 && point.Scale() != 1 && valueType != config.ValueType_Float {
 		logger.Logger.Error("point scale config error , valid config is: float", zap.Any("point", point), zap.String("model", model.Name))
 	}
 }

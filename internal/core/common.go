@@ -40,16 +40,27 @@ func deviceDriverProcess(deviceId string, mode plugin.EncodeMode, pointData ...p
 	scaleEnable := len(device.DriverKey) == 0
 
 	if mode == plugin.WriteMode {
+		// Preserve engineering values for callers and write/readback comparison.
+		pointData = append([]plugin.PointData(nil), pointData...)
 		for i, p := range pointData {
 			point, ok := cache.Get().GetPointByDevice(deviceId, p.PointName)
 			if !ok {
 				return nil, fmt.Errorf("not found point, point name is %s", p.PointName)
 			}
-			value, err := convutil.PointValue(p.Value, point.ValueType())
+			offset, err := point.Offset()
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("device %s point %s: %w", deviceId, p.PointName, err)
 			}
-			if scaleEnable && point.Scale() != 0 {
+			var value interface{}
+			if scaleEnable && offset != 0 {
+				value, err = convutil.WritePointOffset(p.Value, point)
+			} else {
+				value, err = convutil.PointValue(p.Value, point.ValueType())
+			}
+			if err != nil {
+				return nil, fmt.Errorf("device %s point %s: %w", deviceId, p.PointName, err)
+			}
+			if scaleEnable && offset == 0 && point.Scale() != 0 {
 				value, err = divideStrings(value, point.Scale())
 				if err != nil {
 					return nil, err

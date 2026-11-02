@@ -70,12 +70,15 @@ Model Library 负责设备模型的定义和管理。
 | readWrite | string | 必填 | 读写类型: R(只读)、W(只写)、RW(读写) |
 | reportMode | string | 必填 | 上报模式: realTime(实时)、change(变化)、period(周期) |
 | scale | float | 可选 | 缩放系数,用于值转换 |
+| offset | number | 可选 | 工程值偏移，默认 0；内置换算为 raw × scale + offset，写入执行逆变换 |
 | decimals | int | 可选 | 小数位数,仅 float 类型有效 |
 | unit | string | 可选 | 点位单位 |
 
 ## Driver Library
 
 Driver Library 通过 Lua 脚本实现设备层的数据编解码,提供灵活的数据转换能力。
+
+启用设备 `driverKey` 后，内置 scale/offset 换算均由 Lua 脚本接管，框架不会重复执行。脚本应在 decode 中完成工程值换算，并在 encode 中执行对应的逆变换；通用字段规则见[点位配置](/driver-box/guides/device-config/#数值偏移与读写换算)。
 
 ### 编码函数 (Write 操作)
 

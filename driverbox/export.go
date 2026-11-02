@@ -199,7 +199,7 @@ func pointCacheFilter(deviceData *plugin.DeviceData) {
 // 1. 通过设备驱动库对点位值进行解码和加工
 // 2. 执行点位值类型转换
 // 3. 应用精度换算(scale)
-// 4. 应用小数位数保留
+// 4. 应用工程值偏移(offset)，再应用小数位数保留
 // 参数:
 //   - deviceData: 指向设备数据的指针，函数会直接修改其中的值
 //
@@ -236,6 +236,13 @@ func pointValueProcess(deviceData *plugin.DeviceData) error {
 			}
 		}
 	}
+	var rejected map[int]bool
+	reject := func(index int) {
+		if rejected == nil {
+			rejected = make(map[int]bool)
+		}
+		rejected[index] = true
+	}
 	for i, p := range deviceData.Values {
 		point, ok := CoreCache().GetPointByDevice(deviceData.ID, p.PointName)
 		if !ok {
@@ -245,9 +252,24 @@ func pointValueProcess(deviceData *plugin.DeviceData) error {
 			}
 			continue
 		}
-		//点位值类型还原
-		value, err := convutil.PointValue(p.Value, point.ValueType())
+		offset, err := point.Offset()
 		if err != nil {
+			Log().Error("invalid point offset", zap.String("deviceId", deviceData.ID), zap.String("pointName", p.PointName), zap.Error(err))
+			reject(i)
+			continue
+		}
+		// New offset points convert after the complete affine transform, so an
+		// integer raw register may become a fractional engineering value.
+		var value interface{}
+		if !driverEnable && offset != 0 {
+			value, err = convutil.ReadPointOffset(p.Value, point)
+		} else {
+			value, err = convutil.PointValue(p.Value, point.ValueType())
+		}
+		if err != nil {
+			if offset != 0 {
+				reject(i)
+			}
 			if !strings.HasPrefix(deviceData.ID, "vrf/") {
 				Log().Error("convert point value error", zap.Error(err), zap.Any("deviceId", deviceData.ID),
 					zap.String("pointName", p.PointName), zap.Any("value", p.Value))
@@ -256,7 +278,7 @@ func pointValueProcess(deviceData *plugin.DeviceData) error {
 		}
 
 		//精度换算
-		if !driverEnable && point.Scale() != 0 {
+		if !driverEnable && offset == 0 && point.Scale() != 0 {
 			value, err = multiplyWithFloat64(value, point.Scale())
 			if err != nil {
 				Log().Error("multiplyWithFloat64 error", zap.Error(err), zap.Any("deviceId", deviceData.ID))
@@ -271,6 +293,15 @@ func pointValueProcess(deviceData *plugin.DeviceData) error {
 			value = math.Trunc(value.(float64)*multiplier) / multiplier
 		}
 		deviceData.Values[i].Value = value
+	}
+	if len(rejected) > 0 {
+		values := make([]plugin.PointData, 0, len(deviceData.Values)-len(rejected))
+		for i, point := range deviceData.Values {
+			if !rejected[i] {
+				values = append(values, point)
+			}
+		}
+		deviceData.Values = values
 	}
 	return nil
 }

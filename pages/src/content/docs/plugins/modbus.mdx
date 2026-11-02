@@ -296,6 +296,39 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 | bitLen | uint8 | 否 | 位长度（仅位操作） |
 | multiWrite | bool | 否 | 是否强制使用多寄存器写接口 |
 
+### 数值缩放与偏移
+
+Modbus 数值点支持通用 `scale` 和 `offset`，正向 TCP、RTU、RTU over TCP 与反向 TCP 使用相同的公共值处理流程。没有 Lua 设备驱动时，读取先缩放再偏移，写入执行逆向换算：
+
+```text
+工程值 = 原始值 × scale + offset
+原始值 = (工程值 − offset) ÷ scale
+```
+
+以下为温度点示例。读取原始值 400 得到 0℃，通过公共写入 API 写入 25℃ 时向设备写入 650：
+
+```json
+{
+  "name": "temperature",
+  "description": "温度设定值",
+  "primaryTable": "HOLDING_REGISTER",
+  "startAddress": "40001",
+  "rawType": "Uint16",
+  "valueType": "float",
+  "readWrite": "RW",
+  "scale": 0.1,
+  "offset": -40,
+  "decimals": 1,
+  "duration": "5s"
+}
+```
+
+`offset` 缺省为 0，只接受有限 JSON 数值，允许正、负和小数；`scale` 缺省或为 0 保持不缩放的旧含义。偏移的单位为工程单位，不是寄存器地址或原始数值的单位。更多规则见[通用点位配置](/driver-box/guides/device-config/#数值偏移与读写换算)。
+
+String、布尔、线圈/离散输入和位提取点仅允许缺省或数值 0。连接初始化前会校验所有绑定设备的显式 offset（包括只写点）；非法点位拒绝所属连接，不启动其采集器或监听器，其他合法连接继续初始化。控制入口仍会重复校验配置。
+
+启用非零 offset 后，整数寄存器写入必须在逆向换算后为整数且不越界，例如本例写入 25.05℃ 会得到 650.5，因无法编码为 Uint16 而拒绝，不发送写请求。offset 缺省/为 0 的旧点位保留原有取整行为。Lua 设备驱动自行负责换算，内置 scale/offset 不再执行。
+
 ### 设备属性说明
 
 Modbus 设备需要在 `properties` 中配置从站 ID：
@@ -375,7 +408,7 @@ String 配置要求：
 - 只允许保持寄存器和输入寄存器；输入寄存器仅允许 `"R"`。线圈和离散输入不支持 String。
 - `quantity` 必须为 JSON 非负整数，实际范围只读 1–125、可写 1–123。0、null、负数、小数、字符串、布尔、数组和溢出值均拒绝；只有字段缺省时才兼容为 1。
 - 换算后的 `startAddress + quantity` 不得超过 65536，允许恰好到达 65536。String 支持末端十进制地址 50000–65535；使用 `d` 后缀或 `0x` 可明确指定物理地址，其他既有 PLC 地址记法仍有效。
-- `scale`、`decimals`、`bit`、`bitLen` 只能缺省或为数值 0；String 不执行数值缩放或位提取。
+- `scale`、`offset`、`decimals`、`bit`、`bitLen` 只能缺省或为数值 0；String 不执行数值缩放、偏移或位提取。
 - 可读 String 的完整长度不得超过有效 `batchReadLen`。例如长度 24 配上限 16 会拒绝所属连接并提示调大上限；长度 125 要求 `batchReadLen` 至少为 125。同一 String 不拆成多个读取请求。
 
 默认顺序是寄存器地址从低到高，每个寄存器高字节在前。`byteSwap` 交换每个寄存器内部两字节；`wordSwap` 交换相邻寄存器对，末尾单个不动。两种交换独立组合，并作用于写入时完整的补零容量：

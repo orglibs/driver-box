@@ -130,7 +130,7 @@ func TestConnectionStringPrevalidation(t *testing.T) {
 		models := []config.DeviceModel{{Model: config.Model{Name: "model", DevicePoints: []config.Point{p}}, Devices: []config.Device{{ID: "dev", ConnectionKey: "conn"}}}}
 		conf := &ConnectionConfig{BatchReadLen: uint16(tt.batch)}
 		conf.ConnectionKey = "conn"
-		err := validateConnectionStrings(conf, models)
+		err := validateConnectionPoints(conf, models)
 		if (err == nil) != tt.valid {
 			t.Fatalf("%+v: %v", tt, err)
 		}
