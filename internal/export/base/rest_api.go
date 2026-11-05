@@ -78,10 +78,13 @@ func (export *Export) registerApi() {
 	//	}
 	//})
 	// 第五步：启动 REST 服务
+	// Publish the server before starting its goroutine so Destroy also sees a
+	// server whose ListenAndServe has not been scheduled yet.
+	server := &http.Server{Addr: ":" + export.httpListen, Handler: restful.HttpRouter}
+	srv = server
 	go func() {
-		srv = &http.Server{Addr: ":" + export.httpListen, Handler: restful.HttpRouter}
-		e := srv.ListenAndServe()
-		if e != nil {
+		e := server.ListenAndServe()
+		if e != nil && !errors.Is(e, http.ErrServerClosed) {
 			logger.Logger.Error("start rest server error", zap.Error(e))
 		}
 	}()

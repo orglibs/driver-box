@@ -9,12 +9,12 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/julienschmidt/httprouter"
 	"github.com/orglibs/driver-box/v2/driverbox/plugin"
 	"github.com/orglibs/driver-box/v2/internal/core"
 	"github.com/orglibs/driver-box/v2/internal/export/base/restful"
 	"github.com/orglibs/driver-box/v2/pkg/config"
 	"github.com/orglibs/driver-box/v2/pkg/event"
-	"github.com/julienschmidt/httprouter"
 )
 
 var driverInstance *Export
@@ -23,10 +23,10 @@ var srv *http.Server
 
 // 设备自动发现插件
 type Export struct {
-	discoverConn   *net.UDPConn
-	discoverEnable bool
-	ready          bool
-	httpListen     string
+	discoverMu   sync.Mutex
+	discoverConn net.PacketConn
+	ready        bool
+	httpListen   string
 }
 
 func (export *Export) Init() error {
@@ -56,9 +56,10 @@ func (export *Export) Init() error {
 	}
 
 	export.ready = true
-	export.discoverEnable = true
 	export.registerApi()
-	go export.udpDiscover()
+	// Publish the listener before Init returns so failure cleanup cannot race
+	// with a discovery goroutine that has not bound its socket yet.
+	export.udpDiscover()
 	return nil
 }
 
