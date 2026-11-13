@@ -54,6 +54,8 @@ type connector struct {
 	latestWriteTime time.Time //最近一次写操作时间
 
 	writeEncodeMu sync.Mutex
+
+	collectLog collectDiagnostics
 }
 
 // Initialize 插件初始化

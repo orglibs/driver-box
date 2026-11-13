@@ -69,70 +69,74 @@ func (c *connector) initCollectTask(conf *ConnectionConfig) (*crontab.Future, er
 	}
 
 	//注册定时采集任务
-	return driverbox.AddFunc(scanInterval.String(), func() {
-		//遍历所有通讯设备
-		for _, device := range c.devices {
-			if len(device.pointGroup) == 0 {
+	return driverbox.AddFunc(scanInterval.String(), func() { c.collectOnce(conf) })
+}
+
+// collectOnce preserves the scheduler's read/backoff decisions; diagnostics are
+// flushed even when every due group yields to a write.
+func (c *connector) collectOnce(conf *ConnectionConfig) {
+	defer func() { c.collectLog.flush(driverbox.Log(), conf.ConnectionKey, time.Now()) }()
+	//遍历所有通讯设备
+	for _, device := range c.devices {
+		if len(device.pointGroup) == 0 {
+			continue
+		}
+		//批量遍历通讯设备下的点位，并将结果关联至物模型设备
+		for i, group := range device.pointGroup {
+			if c.close {
+				driverbox.Log().Warn("modbus connection is closed, ignore collect task!", zap.String("key", c.config.ConnectionKey))
+				return
+			}
+
+			duration := group.Duration
+			if group.TimeOutCount > 0 {
+				duration = duration * time.Duration(1<<group.TimeOutCount)
+				//最大不超过一分钟
+				if duration > time.Minute {
+					duration = time.Minute
+				} else if duration < 0 { //溢出，重置
+					group.TimeOutCount = 0
+					duration = group.Duration
+				}
+			}
+			//采集时间未到
+			if group.LatestTime.Add(duration).After(time.Now()) {
 				continue
 			}
-			//批量遍历通讯设备下的点位，并将结果关联至物模型设备
-			for i, group := range device.pointGroup {
-				if c.close {
-					driverbox.Log().Warn("modbus connection is closed, ignore collect task!", zap.String("key", c.config.ConnectionKey))
-					return
-				}
 
-				duration := group.Duration
-				if group.TimeOutCount > 0 {
-					duration = duration * time.Duration(1<<group.TimeOutCount)
-					//最大不超过一分钟
-					if duration > time.Minute {
-						duration = time.Minute
-					} else if duration < 0 { //溢出，重置
-						group.TimeOutCount = 0
-						duration = group.Duration
-					}
-					driverbox.Log().Warn("modbus connection has timeout, increase duration", zap.Any("group", group), zap.Any("duration", duration))
-				}
-				//采集时间未到
-				if group.LatestTime.Add(duration).After(time.Now()) {
-					continue
-				}
-
-				//最近发生过写操作，推测当前时段可能存在其他设备的写入需求，采集任务主动避让
-				if c.writeSemaphore.Load() > 0 || c.latestWriteTime.Add(time.Duration(conf.MinInterval)).After(time.Now()) {
-					driverbox.Log().Warn("modbus connection is writing, ignore collect task!", zap.String("key", c.config.ConnectionKey), zap.Any("semaphore", c.writeSemaphore.Load()))
-					continue
-				}
-
-				driverbox.Log().Debug("timer read modbus", zap.Any("group", i), zap.Any("latestTime", group.LatestTime), zap.Any("duration", group.Duration))
-				bac := command{
-					Mode:  plugin.ReadMode,
-					Value: group,
-				}
-				if err := c.Send(bac); err != nil {
-					driverbox.Log().Error("read error", zap.Any("connection", conf), zap.Any("group", group), zap.Error(err))
-					//发生读超时，设备可能离线或者当前group点位配置有问题。将当前group的采集时间设置为未来值，跳过数个采集周期
-					if errors.Is(err, modbus.ErrRequestTimedOut) {
-						group.TimeOutCount += 1
-					}
-					//通讯失败，触发离线
-					devices := make(map[string]interface{})
-					for _, point := range group.Points {
-						if devices[point.DeviceId] != nil {
-							continue
-						}
-						devices[point.DeviceId] = point.Name
-						_ = driverbox.Shadow().MayBeOffline(point.DeviceId)
-					}
-				} else {
-					group.TimeOutCount = 0
-				}
-				group.LatestTime = time.Now()
+			//最近发生过写操作，推测当前时段可能存在其他设备的写入需求，采集任务主动避让
+			if c.writeSemaphore.Load() > 0 || c.latestWriteTime.Add(time.Duration(conf.MinInterval)).After(time.Now()) {
+				c.collectLog.deferRead(group, time.Now())
+				continue
 			}
 
+			driverbox.Log().Debug("timer read modbus", zap.Any("group", i), zap.Any("latestTime", group.LatestTime), zap.Any("duration", group.Duration))
+			bac := command{
+				Mode:  plugin.ReadMode,
+				Value: group,
+			}
+			if err := c.Send(bac); err != nil {
+				c.collectLog.readFailed(driverbox.Log(), conf.ConnectionKey, group, err, time.Now())
+				//发生读超时，设备可能离线或者当前group点位配置有问题。将当前group的采集时间设置为未来值，跳过数个采集周期
+				if errors.Is(err, modbus.ErrRequestTimedOut) {
+					group.TimeOutCount += 1
+				}
+				//通讯失败，触发离线
+				devices := make(map[string]interface{})
+				for _, point := range group.Points {
+					if devices[point.DeviceId] != nil {
+						continue
+					}
+					devices[point.DeviceId] = point.Name
+					_ = driverbox.Shadow().MayBeOffline(point.DeviceId)
+				}
+			} else {
+				group.TimeOutCount = 0
+			}
+			group.LatestTime = time.Now()
 		}
-	})
+
+	}
 }
 
 func (c *connector) readBarriersForSlave(conf *ConnectionConfig, model config.DeviceModel, unitID uint8) ([]*Point, error) {
@@ -309,9 +313,15 @@ func (c *connector) sendReadCommand(group *pointGroup) error {
 
 	if c.writeSemaphore.Load() > 0 {
 		c.resetCollectTime(group)
-		driverbox.Log().Warn("modbus connection is writing, ignore collect task!", zap.String("key", c.config.ConnectionKey), zap.Int32("semaphore", c.writeSemaphore.Load()))
+		c.collectLog.deferRead(group, time.Now())
 		return nil
 	}
+
+	connectionKey := ""
+	if c.config != nil {
+		connectionKey = c.config.ConnectionKey
+	}
+	c.collectLog.readStarted(driverbox.Log(), connectionKey, group, time.Now())
 
 	var values []uint16
 	var err error
@@ -324,6 +334,7 @@ func (c *connector) sendReadCommand(group *pointGroup) error {
 	if err != nil {
 		return err
 	}
+	c.collectLog.readSucceeded(driverbox.Log(), connectionKey, group, time.Now())
 	// 保留本次读取的批次边界；同一从机的点位可能属于多个物模型设备。
 	var batches []plugin.DeviceData
 	for _, point := range group.Points {
