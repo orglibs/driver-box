@@ -118,6 +118,7 @@ func (p *Plugin) initConnPool() (err error) {
 			continue
 		}
 
+		c.Enable = enabled
 		c.ConnectionKey = key
 		normalizeConnectionConfig(&c)
 

@@ -1,6 +1,6 @@
 # 设备级点位选择
 
-状态：未发布。基于 v2.1.11 的补丁及后续修复，应用代码并重新构建后生效，不代表 v2.1.11 原发行版已有此能力。
+状态：已发布（v2.2.0）。基于 v2.2.0 发行版，应用代码并重新构建后生效。
 
 文档站入口：[设备配置](../pages/src/content/docs/guides/device-config.mdx)、[Modbus](../pages/src/content/docs/plugins/modbus.mdx)、[核心缓存 API](../pages/src/content/docs/concepts/corecache.mdx)。
 
