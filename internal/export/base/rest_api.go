@@ -276,7 +276,7 @@ func deviceList(r *http.Request) (any, error) {
 	}
 	devices := make([]Device, 0)
 	for _, device := range cache.Get().Devices() {
-		points, _ := cache.Get().GetPoints(device.ModelName)
+		points, _ := cache.Get().GetDevicePoints(device.ID)
 		devices = append(devices, Device{
 			Device: device,
 			Points: points,

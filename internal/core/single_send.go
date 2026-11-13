@@ -15,10 +15,13 @@ import (
 // 单点操作
 func SendSinglePoint(deviceId string, mode plugin.EncodeMode, pointData plugin.PointData) error {
 	logger.Logger.Info("send single point", zap.String("deviceId", deviceId), zap.Any("mode", mode), zap.Any("pointData", pointData))
-	_ = shadow.Shadow().SetWritePointValue(deviceId, pointData.PointName, pointData.Value)
 	if !checkMode(mode) {
 		return errors.New("invalid mode")
 	}
+	if err := validateSelectedAccess(deviceId, mode, []plugin.PointData{pointData}); err != nil {
+		return err
+	}
+	_ = shadow.Shadow().SetWritePointValue(deviceId, pointData.PointName, pointData.Value)
 	result, err := deviceDriverProcess(deviceId, mode, pointData)
 	if err != nil {
 		return err
@@ -29,6 +32,9 @@ func SendSinglePoint(deviceId string, mode plugin.EncodeMode, pointData plugin.P
 		return nil
 	}
 
+	if err := validateSelectedAccess(deviceId, mode, result); err != nil {
+		return err
+	}
 	for _, v := range result {
 		if mode == plugin.WriteMode {
 			err = singleWrite(deviceId, v)

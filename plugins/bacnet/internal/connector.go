@@ -60,7 +60,12 @@ func (c *connector) initCollectTask(bic *bacIpConfig) (err error) {
 			if dev.ConnectionKey != c.key {
 				continue
 			}
-			for _, point := range model.DevicePoints {
+			points, selectionErr := model.PointsFor(dev)
+			if selectionErr != nil {
+				driverbox.Log().Error("invalid device point selection", zap.Error(selectionErr))
+				return selectionErr
+			}
+			for _, point := range points {
 				if point.ReadWrite() != config.ReadWrite_R && point.ReadWrite() != config.ReadWrite_RW {
 					continue
 				}

@@ -38,8 +38,8 @@ func TestModbusReadWriteEnums(t *testing.T) {
 	for _, raw := range []interface{}{"W", config.ReadWrite_W} {
 		point := writeOnlyTestPoint("command", 101, "W")
 		point["readWrite"] = raw
-		if got := writeOnlyReadBarriers([]config.Point{point}); len(got) != 1 {
-			t.Fatalf("write-only barrier missing for %T(%v)", raw, raw)
+		if got, err := writeOnlyReadBarriers([]config.Point{point}); err != nil || len(got) != 1 {
+			t.Fatalf("write-only barrier missing for %T(%v): %v", raw, raw, err)
 		}
 		point["bitLen"] = 1
 		if _, err := convToPointExtend(point); err == nil || !strings.Contains(err.Error(), "write-only") {

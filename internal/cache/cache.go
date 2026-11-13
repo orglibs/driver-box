@@ -50,6 +50,9 @@ type CoreCache interface {
 	// 返回: []config.Point - 点位数组, bool - 是否查询成功
 	GetPoints(modelName string) ([]config.Point, bool)
 
+	// GetDevicePoints returns enabled points, including an empty list for selected [].
+	GetDevicePoints(id string) ([]config.Point, bool)
+
 	// GetDevice 根据设备ID获取设备信息
 	// 参数: id - 设备ID
 	// 返回: device - 设备结构体, ok - 是否找到设备
@@ -206,7 +209,7 @@ func convertConfig(pluginName string) config.DeviceConfig {
 				if device.PluginName != pluginName {
 					logger.Logger.Error("device pluginName not equal", zap.Any("device", device))
 				}
-				devices = append(devices, device.Device)
+				devices = append(devices, copyDeviceSelection(device.Device))
 			}
 		}
 		models = append(models, config.DeviceModel{
@@ -293,9 +296,11 @@ func (c *cache) loadConfig(plugins map[string]plugin.Plugin) error {
 				}
 				device.ModelName = model.Name
 				device.PluginName = cfg.PluginName
-				c.devices[device.ID] = cacheDevice{
-					device,
+				compiled, err := compileDevice(device, model.Model)
+				if err != nil {
+					return err
 				}
+				c.devices[device.ID] = compiled
 			}
 			points := make(map[string]*config.Point)
 			for k, _ := range model.DevicePoints {
@@ -342,6 +347,9 @@ func parseConfigFromFile(path string) (config.DeviceConfig, error) {
 	// json 解析
 	var c config.DeviceConfig
 	if err = json.Unmarshal(bytes, &c); err != nil {
+		return config.DeviceConfig{}, err
+	}
+	if err := c.ValidatePointSelections(); err != nil {
 		return config.DeviceConfig{}, err
 	}
 	return c, nil
@@ -442,7 +450,7 @@ func (c *cache) GetDevice(id string) (config.Device, bool) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	if dev, exist := c.devices[id]; exist {
-		return dev.Device, true
+		return copyDeviceSelection(dev.Device), true
 	}
 	return config.Device{}, false
 }
@@ -474,11 +482,21 @@ func (c *cache) GetPointByModel(modelName string, pointName string) (point confi
 
 // GetPointByDevice 查询指定设备的指定点位信息
 func (c *cache) GetPointByDevice(id string, pointName string) (point config.Point, ok bool) {
-	// 查询设备
-	if device, ok := c.GetDevice(id); ok {
-		return c.GetPointByModel(device.ModelName, pointName)
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	device, ok := c.devices[id]
+	if !ok || (device.enabledNames != nil && !device.enabledNames[pointName]) {
+		return config.Point{}, false
 	}
-	return config.Point{}, false
+	model, ok := c.models[device.ModelName]
+	if !ok {
+		return config.Point{}, false
+	}
+	definition, ok := model.points[pointName]
+	if !ok {
+		return config.Point{}, false
+	}
+	return *definition, true
 }
 
 func GetRunningPluginByDevice(id string) (plugin plugin.Plugin, ok bool) {
@@ -509,7 +527,7 @@ func (c *cache) Devices() (devices []config.Device) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	for _, dev := range c.devices {
-		devices = append(devices, dev.Device)
+		devices = append(devices, copyDeviceSelection(dev.Device))
 	}
 	return
 }
@@ -609,6 +627,10 @@ func (c *cache) AddOrUpdateDevice(dev config.Device) error {
 
 	dev.PluginName = model.pluginName
 
+	compiled, err := compileDevice(dev, model.Model)
+	if err != nil {
+		return err
+	}
 	storedDeviceBase, ok := c.devices[dev.ID]
 	// 校验设备是否已存在
 	if ok {
@@ -623,9 +645,7 @@ func (c *cache) AddOrUpdateDevice(dev config.Device) error {
 			go export.TriggerEvents(event.DeviceAdded, dev.ID, nil)
 		}()
 	}
-	c.devices[dev.ID] = cacheDevice{
-		Device: dev,
-	}
+	c.devices[dev.ID] = compiled
 
 	// 更新设备影子
 	if !shadow.Shadow().HasDevice(dev.ID) {
@@ -698,6 +718,18 @@ func (c *cache) AddModel(pluginName string, model config.Model) error {
 		}
 		logger.Logger.Info("model already exists, updating...", zap.String("modelName", model.Name))
 	}
+	// Validate all existing bindings before replacing either model or device views.
+	bindings := make(map[string]cacheDevice)
+	for id, device := range c.devices {
+		if device.ModelName != model.Name {
+			continue
+		}
+		compiled, err := compileDevice(device.Device, model)
+		if err != nil {
+			return err
+		}
+		bindings[id] = compiled
+	}
 	points := make(map[string]*config.Point)
 	for i, point := range model.DevicePoints {
 		points[point.Name()] = &model.DevicePoints[i]
@@ -706,6 +738,9 @@ func (c *cache) AddModel(pluginName string, model config.Model) error {
 		pluginName: pluginName,
 		Model:      model,
 		points:     points,
+	}
+	for id, device := range bindings {
+		c.devices[id] = device
 	}
 	c.flushable(pluginName)
 	return nil

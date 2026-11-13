@@ -27,6 +27,7 @@ driver-box 采用 JSON 格式进行设备配置，所有配置文件位于 `res/
 - [顶层配置](#顶层配置)
 - [设备模型（DeviceModel）](#设备模型devicemodel)
 - [设备（Device）](#设备device)
+- [设备级点位选择](#设备级点位选择)
 - [点位（Point）](#点位point)
 - [连接配置（connections）](#连接配置connections)
 - [协议扩展参数](#协议扩展参数)
@@ -180,8 +181,49 @@ graph TD
     | connectionKey | string | 是 | 关联的连接配置键（对应 `connections` 中的键名） |
     | properties | object | 否 | 设备属性（协议相关，如 Modbus 的 `unitID`），类型为 `map[string]string` |
     | driverKey | string | 否 | 设备层驱动引用 |
+    | pointSelection | object | 否 | 设备级点位选择；省略时使用模型全部点位，详见下节 |
   </TabItem>
 </Tabs>
+
+### 设备级点位选择
+
+此能力位于未发布的设备级点位选择改动中，需要使用包含该实现的构建。`pointSelection` 配置在每个设备上，模型的 `devicePoints` 仍由设备共享，不需要复制模型。
+以下示例为 `devices[]` 中的一项，假定所属模型已定义 `temperature` 和 `humidity` 两个点位。
+
+```json
+{
+  "id": "device-001",
+  "description": "会议室传感器",
+  "connectionKey": "modbus-tcp-01",
+  "properties": {"unitID": "1"},
+  "pointSelection": {
+    "mode": "selected",
+    "names": ["temperature", "humidity"]
+  }
+}
+```
+
+`names` 使用所属模型的 `devicePoints[].name`，精确匹配并区分大小写。列表顺序不会重排模型点位。
+
+| 配置 | 启用范围 |
+| --- | --- |
+| 新配置省略 `pointSelection` | 完整模型点表，保留原有范围和顺序 |
+| `{"mode":"all"}` | 完整模型点表，模型新增点位后自动包含 |
+| `{"mode":"selected","names":["temperature"]}` | 仅启用所列点位，模型新增点位不会自动包含 |
+| `{"mode":"selected","names":[]}` | 零点位，保留设备身份，不回退为完整模型 |
+
+`selected` 必须提供 `names` 数组，省略或 `null` 均不合法；未知、重复、空白或歧义点名会被拒绝。`pointSelection: null` 不合法；`all` 不接受非空 `names`。
+点位启用后仍须符合 `readWrite` 权限。批量读写请求中包含未启用点时，整批在物理发送前拒绝；原始请求在 Lua 编码前检查，编码后的点位再次检查。
+
+当前 Modbus（含反向）、DL/T645、IEC104、BACnet、OPC UA 和 S7 的采集/监视使用设备有效点表。主动读写与设备点位列表同样遵循选择，TCP Server 等推送结果通过公共导出流程过滤。
+
+`selected` 设备的 Lua 驱动加载或解码失败时，不写入新的 Shadow 点值、不触发 `Exporting` 点值事件，也不调用 `ExportTo`；原始 `DoExport` 诊断事件保留。省略选择或使用 `all` 时保持原有异常处理路径。
+
+对已有 `Device` 做 JSON 局部更新时，未提供的字段和已有 `pointSelection` 会保留，`properties` 按原来的 map 规则合并。显式提供选择对象时整体替换；恢复全部点位请提供 `{"mode":"all"}`，不能用省略字段来清除已有选择。
+
+更新选择后需要按现有流程重建插件连接/采集任务或重启；不提供在途任务取消、历史 Shadow 清理或已启动任务的立即重分组。
+选择限制逻辑点位，并不保证批量请求不经过未选点的物理地址。Modbus 地址避让需结合 [只写与批量读取配置](/driver-box/plugins/modbus/#只写点位)。
+应用查询设备有效点表应使用 [CoreCache.GetDevicePoints](/driver-box/concepts/corecache/#设备有效点表)，模型完整定义仍通过 `GetPoints` 获取。
 
 ## 点位（Point）
 

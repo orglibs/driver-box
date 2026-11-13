@@ -331,9 +331,12 @@ if err != nil {
 - `HasDevice()` - 判断设备是否存在
 
 **点位查询：**
-- `GetPoints()` - 获取模型点位
-- `GetPointByDevice()` - 根据设备ID查询点位
+- `GetPoints()` - 获取模型完整点位定义
+- `GetDevicePoints()` - 获取设备启用的点位配置，遵循 `pointSelection`
+- `GetPointByDevice()` - 根据设备ID查询启用点位，未启用点返回不存在
 - `GetPointByModel()` - 根据模型查询点位
+
+设备级点位选择规则见[设备配置](/driver-box/guides/device-config/#设备级点位选择)。`CoreCache.GetDevicePoints()` 的空切片且 `true` 表示合法的零点位设备，`false` 表示设备不存在；与设备影子中的同名方法返回的点值不同。自定义 `CoreCache` 实现和测试替身需实现新增方法。
 
 **模型查询：**
 - `Models()` - 获取所有模型

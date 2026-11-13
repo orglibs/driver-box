@@ -135,6 +135,30 @@ func (c *connector) initCollectTask(conf *ConnectionConfig) (*crontab.Future, er
 	})
 }
 
+func (c *connector) readBarriersForSlave(conf *ConnectionConfig, model config.DeviceModel, unitID uint8) ([]*Point, error) {
+	if c.plugin == nil || len(c.plugin.config.DeviceModels) == 0 {
+		return writeOnlyReadBarriers(model.DevicePoints)
+	}
+	var barriers []*Point
+	// Include the complete shared model, even when this device disables its W points.
+	for _, otherModel := range c.plugin.config.DeviceModels {
+		for _, otherDev := range otherModel.Devices {
+			if otherDev.ConnectionKey != conf.ConnectionKey {
+				continue
+			}
+			if otherUnit, err := getUnitId(otherDev.Properties); err == nil && otherUnit == unitID {
+				points, err := writeOnlyReadBarriers(otherModel.DevicePoints)
+				if err != nil {
+					return nil, fmt.Errorf("model %q: %w", otherModel.Name, err)
+				}
+				barriers = append(barriers, points...)
+				break
+			}
+		}
+	}
+	return barriers, nil
+}
+
 // 采集任务分组
 func (c *connector) createPointGroup(conf *ConnectionConfig, model config.DeviceModel, dev config.Device) {
 	// Register the device even when every point is write-only.
@@ -146,26 +170,19 @@ func (c *connector) createPointGroup(conf *ConnectionConfig, model config.Device
 	groupIndex := len(device.pointGroup)
 	var barriers []*Point
 	if conf.SkipWriteOnlyInBatchRead {
-		// Models sharing a physical slave must respect each other's write-only
-		// addresses, regardless of initialization order. Scan all configured models
-		// without adding the current model twice; standalone callers use the model.
-		if c.plugin != nil && len(c.plugin.config.DeviceModels) > 0 {
-			for _, otherModel := range c.plugin.config.DeviceModels {
-				for _, otherDev := range otherModel.Devices {
-					if otherDev.ConnectionKey != conf.ConnectionKey {
-						continue
-					}
-					if unitID, err := getUnitId(otherDev.Properties); err == nil && unitID == device.unitID {
-						barriers = append(barriers, writeOnlyReadBarriers(otherModel.DevicePoints)...)
-						break
-					}
-				}
-			}
-		} else {
-			barriers = writeOnlyReadBarriers(model.DevicePoints)
+		barriers, err = c.readBarriersForSlave(conf, model, device.unitID)
+		if err != nil {
+			driverbox.Log().Error("invalid Modbus write-only read barrier", zap.String("connectionKey", conf.ConnectionKey), zap.String("deviceId", dev.ID), zap.Error(err))
+			device.pointGroup = nil
+			return
 		}
 	}
-	for _, point := range model.DevicePoints {
+	points, selectionErr := model.PointsFor(dev)
+	if selectionErr != nil {
+		driverbox.Log().Error("invalid device point selection", zap.Error(selectionErr))
+		return
+	}
+	for _, point := range points {
 		if point.ReadWrite() != config.ReadWrite_R && point.ReadWrite() != config.ReadWrite_RW {
 			continue
 		}

@@ -225,6 +225,10 @@ func pointValueProcess(deviceData *plugin.DeviceData) error {
 		result := library.Driver().DeviceDecode(device.DriverKey, library.DeviceDecodeRequest{DeviceId: deviceData.ID, Points: deviceData.Values})
 		if result.Error != nil {
 			Log().Error("library.DeviceDecode error", zap.Error(result.Error), zap.Any("deviceData", deviceData))
+			if device.PointSelection != nil && device.PointSelection.Mode == "selected" {
+				// Export must not forward the unfiltered input after decode fails.
+				deviceData.Values = nil
+			}
 			return result.Error
 		} else {
 			deviceData.Values = result.Points
@@ -246,6 +250,10 @@ func pointValueProcess(deviceData *plugin.DeviceData) error {
 	for i, p := range deviceData.Values {
 		point, ok := CoreCache().GetPointByDevice(deviceData.ID, p.PointName)
 		if !ok {
+			if device.PointSelection != nil && device.PointSelection.Mode == "selected" {
+				reject(i)
+				continue
+			}
 			//todo 临时屏蔽vrf异常日志输出
 			if !strings.HasPrefix(deviceData.ID, "vrf/") {
 				Log().Error("unknown point", zap.Any("deviceId", deviceData.ID), zap.Any("pointName", p.PointName))

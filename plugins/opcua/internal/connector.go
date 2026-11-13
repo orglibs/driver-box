@@ -27,7 +27,12 @@ func newConnector(p *Plugin, config *ConnectionConfig) (*connector, error) {
 }
 
 func (c *connector) createNodeGroups(model config.DeviceModel, device config.Device) {
-	for _, point := range model.DevicePoints {
+	points, selectionErr := model.PointsFor(device)
+	if selectionErr != nil {
+		driverbox.Log().Error("invalid device point selection", zap.Error(selectionErr))
+		return
+	}
+	for _, point := range points {
 		nodeCfg := &NodeConfig{}
 		ext, _ := point.FieldValue("ext")
 		if ext != nil {

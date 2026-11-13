@@ -118,7 +118,12 @@ func (c *connector) initCollectTask(conf *ConnectionConfig) (*crontab.Future, er
 // 采集任务分组
 func (c *connector) createPointGroup(conf *ConnectionConfig, model config.DeviceModel, dev config.Device) {
 	groupIndex := 0
-	for _, point := range model.DevicePoints {
+	points, selectionErr := model.PointsFor(dev)
+	if selectionErr != nil {
+		driverbox.Log().Error("invalid device point selection", zap.Error(selectionErr))
+		return
+	}
+	for _, point := range points {
 		if point.ReadWrite() != config.ReadWrite_R && point.ReadWrite() != config.ReadWrite_RW {
 			continue
 		}

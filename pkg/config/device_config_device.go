@@ -2,6 +2,8 @@ package config
 
 // Device 设备
 type Device struct {
+	// Optional device point scope; omitted means all, selected [] means zero.
+	PointSelection *PointSelection `json:"pointSelection,omitempty"`
 	// 设备 ID
 	ID string `json:"id" validate:"required"`
 	// 模型名称

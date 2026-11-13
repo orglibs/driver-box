@@ -81,7 +81,27 @@ GetPointByDevice(id string, pointName string) (point config.Point, ok bool)
 
 // 获取模型所有点位
 GetPoints(modelName string) ([]config.Point, bool)
+
+// 获取设备启用的点位；空列表且 true 表示合法的零点位设备
+GetDevicePoints(id string) ([]config.Point, bool)
 ```
+
+### 设备有效点表
+
+设备级 `pointSelection` 保持模型共享，核心缓存为每台设备维护有效点表：
+
+| 方法 | 返回范围 |
+| --- | --- |
+| `GetPoints(modelName)`、`GetPointByModel(modelName, name)` | 模型完整定义，不按设备筛选 |
+| `GetDevicePoints(deviceID)` | 设备启用的点位；省略选择或 `all` 时为完整模型点表 |
+| `GetPointByDevice(deviceID, name)` | 仅查询启用点；未启用点和不存在点均返回 `false` |
+
+`GetDevicePoints` 返回空切片且 `true` 表示设备存在但无启用点位，包括 `selected` 空清单；返回 `false` 表示设备不存在。它查询的是点位配置；与 `driverbox.Shadow().GetDevicePoints()` 返回的历史点值和状态不同，停用点位不会自动清除历史 Shadow 数据。
+
+`AddOrUpdateDevice` 校验后才保存新的选择；`AddModel` 会先验证所有已绑定设备的选择，再一起更新模型和设备有效点表。失败更新不会替换原缓存，持久化仍保存完整模型与每台设备的选择。
+缓存更新不提供运行中采集任务的立即重分组，修改后需要重建插件连接/任务或重启。配置规则与局部更新语义见[设备级点位选择](/driver-box/guides/device-config/#设备级点位选择)。
+
+`CoreCache` 接口新增了 `GetDevicePoints`，自定义接口实现或测试替身需要补齐该方法。
 
 ### 连接管理
 
@@ -169,6 +189,8 @@ CoreCache 在加载配置时进行以下验证:
 - 检测到配置文件变更时自动重新加载
 - 配置变更无需重启系统
 
+设备点位选择的缓存更新与采集任务生效分开：更改 `pointSelection` 后仍需按现有流程重建插件连接/任务或重启，不保证立即取消在途请求。
+
 ### 自动持久化
 
 - 配置变更后每 5 秒自动写入磁盘
@@ -199,10 +221,10 @@ if !ok {
     return
 }
 
-// 获取设备点位
-points, ok := cache.GetPoints(device.ModelName)
+// 获取该设备启用的点位；需要完整模型时使用 GetPoints(device.ModelName)
+points, ok := cache.GetDevicePoints(device.ID)
 if !ok {
-    log.Error("模型不存在")
+    log.Error("设备不存在")
     return
 }
 ```

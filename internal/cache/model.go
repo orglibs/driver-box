@@ -28,4 +28,6 @@ type cacheModel struct {
 
 type cacheDevice struct {
 	config.Device
+	enabledPoints []config.Point
+	enabledNames  map[string]bool // nil means all; non-nil empty means selected []
 }

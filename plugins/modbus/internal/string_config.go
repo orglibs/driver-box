@@ -110,7 +110,18 @@ func validateConnectionPoints(conf *ConnectionConfig, models []config.DeviceMode
 			if device.ConnectionKey != conf.ConnectionKey {
 				continue
 			}
-			for _, point := range model.DevicePoints {
+			if conf.SkipWriteOnlyInBatchRead {
+				if _, err := writeOnlyReadBarriers(model.DevicePoints); err != nil {
+					context := fmt.Errorf("connectionKey=%s model=%s deviceId=%s: %w", conf.ConnectionKey, model.Name, device.ID, err)
+					driverbox.Log().Error("invalid Modbus write-only read barrier", zap.Error(context))
+					return context
+				}
+			}
+			points, err := model.PointsFor(device)
+			if err != nil {
+				return err
+			}
+			for _, point := range points {
 				access := point.ReadWrite()
 				_, hasOffset := point["offset"]
 				var err error

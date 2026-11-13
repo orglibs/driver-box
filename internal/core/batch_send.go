@@ -16,6 +16,9 @@ import (
 // SendBatchWrite 发送多个点位写命令
 func SendBatchWrite(deviceId string, points []plugin.PointData) (err error) {
 	logger.Logger.Info("send batch write", zap.String("deviceId", deviceId), zap.Any("points", points))
+	if err := validateSelectedAccess(deviceId, plugin.WriteMode, points); err != nil {
+		return err
+	}
 	for _, point := range points {
 		_ = shadow.Shadow().SetWritePointValue(deviceId, point.PointName, point.Value)
 	}
@@ -27,6 +30,10 @@ func SendBatchWrite(deviceId string, points []plugin.PointData) (err error) {
 	if len(result) == 0 {
 		logger.Logger.Warn("device driver process result is empty", zap.String("deviceId", deviceId))
 		return nil
+	}
+
+	if err := validateSelectedAccess(deviceId, plugin.WriteMode, result); err != nil {
+		return err
 	}
 
 	connector, err := getConnector(deviceId)

@@ -741,7 +741,13 @@ func (rc *reverseConnector) addDevice(model config.DeviceModel, dev config.Devic
 	var barriers []*Point
 	if rc.config.SkipWriteOnlyInBatchRead {
 		// Reverse sessions are isolated by device ID, so barriers are local to this device.
-		barriers = writeOnlyReadBarriers(model.DevicePoints)
+		var err error
+		barriers, err = writeOnlyReadBarriers(model.DevicePoints)
+		if err != nil {
+			modbusLog().Error("invalid Modbus write-only read barrier", zap.String("connectionKey", rc.config.ConnectionKey), zap.String("deviceId", dev.ID), zap.Error(err))
+			delete(rc.devicePointGroups, dev.ID)
+			return
+		}
 	}
 
 	unitId, err := getUnitId(dev.Properties)
@@ -749,7 +755,12 @@ func (rc *reverseConnector) addDevice(model config.DeviceModel, dev config.Devic
 		unitId = 1
 	}
 
-	for _, point := range model.DevicePoints {
+	points, selectionErr := model.PointsFor(dev)
+	if selectionErr != nil {
+		driverbox.Log().Error("invalid device point selection", zap.Error(selectionErr))
+		return
+	}
+	for _, point := range points {
 		if point.ReadWrite() != config.ReadWrite_R && point.ReadWrite() != config.ReadWrite_RW {
 			continue
 		}

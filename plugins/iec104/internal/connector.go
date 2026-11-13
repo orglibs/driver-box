@@ -109,7 +109,12 @@ func newConnector(s settings, cfg config.DeviceConfig, export func([]plugin.Devi
 				return nil, fmt.Errorf("duplicate device %s", device.ID)
 			}
 			points := make(map[string]node)
-			for _, point := range model.DevicePoints {
+			selectedPoints, err := model.PointsFor(device)
+			if err != nil {
+				cancel()
+				return nil, err
+			}
+			for _, point := range selectedPoints {
 				n, err := resolvePoint(point, device, s.CommonAddress)
 				if err != nil {
 					cancel()
