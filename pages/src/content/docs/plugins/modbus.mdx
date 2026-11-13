@@ -13,7 +13,7 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 - **Modbus TCP**：TCP/IP 网络通讯（正向 Master 模式）
 - **Modbus 反向 TCP（reverse_tcp）**：TCP Server 模式，网关监听端口，接收外部设备（如充电桩、DTU）主动连入；可选择寄存器标识、来源 IP 或单设备绑定，随后作为 Master 发起主动轮询与下发控制
 - **功能码支持**：0x01（读线圈）、0x02（读离散输入）、0x03（读保持寄存器）、0x04（读输入寄存器）、0x05/0x0F（写线圈）、0x06/0x10（写保持寄存器）
-- **批量读取**：自动将相同采集频率和连续地址的点位合并读取
+- **批量读取**：自动合并相同采集频率、地址跨度符合限制的点位，支持配置允许跨越的地址空洞
 - **批量写入**：支持批量写入连续地址的保持寄存器
 - **数据类型**：支持 Bool、String、Uint16/Int16、Uint32/Int32、Uint64/Int64、Float32/Float64
 - **字节交换**：支持字节交换（ByteSwap）和字交换（WordSwap）
@@ -256,6 +256,8 @@ Modbus 插件实现了 Modbus RTU 和 Modbus TCP 协议，支持从 Modbus 从�
 | minInterval | uint16 | 100 | 最小采集间隔（毫秒） |
 | scanInterval | string | `1s` | 连接采集任务扫描周期。仅控制调度器检查频率，不改变点位的 `duration` 采集周期 |
 | batchReadLen | uint16 | 32 | 批量读取合并上限；FC03/FC04 的有效上限为此值与 125 的较小值，0 按默认 32 处理；线圈沿用原规则 |
+| maxReadGap | uint16 | 跟随有效 batchReadLen，通常为 32 | 合并两个读取区间时允许额外读取的中间地址数量。省略时保留原有跨地址合并行为；显式设为 0 时只合并相邻或重叠区间。整个请求仍受 batchReadLen 上限约束 |
+| skipWriteOnlyInBatchRead | bool | false | 是否在批量读取时避开只写点位占用的地址。默认允许读取区间经过这些地址，保持原有逻辑；设为 true 时将只写地址作为分组边界 |
 | batchWriteLen | uint16 | 0 | 连续保持寄存器写入的最大合并长度；默认不合并，设置为正值后才合并连续写入 |
 | virtual | bool | false | 是否启用虚拟模式（测试用） |
 
@@ -448,11 +450,14 @@ String 配置要求：
 
 ## 批量采集
 
-插件自动将相同采集频率、相同寄存器类型、连续地址的点位合并为一个采集组：
+插件自动将相同采集频率、相同寄存器类型且地址跨度符合限制的点位合并为一个采集组：
 
 - 相同 `duration` 的点位分为一组
 - 相同 `primaryTable` 的点位才能同组
-- 地址区间长度不超过 `batchReadLen` 时合并，超过则拆分为新组
+- 默认允许跨越未配置的中间地址，沿用原有合并方式，合并长度不得超过有效 `batchReadLen`
+- 默认允许批量读取区间经过只写点位地址；只写点位本身不作为采集点，不解码或上报这些地址的值
+- `skipWriteOnlyInBatchRead: true` 时，已配置的只写地址作为分组边界；同一普通连接、同一从站下其他物模型的只写地址也会参与避让
+- `maxReadGap` 默认跟随有效 `batchReadLen`，通常为 `32`；设为 `0` 时只合并相邻或重叠区间，设为正数时限制中间空洞大小
 - FC03/FC04 的合并范围还不得超过 125 个寄存器；String 保持完整，FC01/FC02 不套用此上限
 - 减少通讯次数，提高采集效率
 
@@ -465,6 +470,38 @@ String 配置要求：
 - 失败自动重试，次数由 `retry` 参数控制
 - String 写入返回恰好 `quantity` 个寄存器，短文本对剩余容量补零，清除旧内容；单寄存器默认 FC06，`multiWrite: true` 强制 FC16，多寄存器采用 FC16
 - FC16 单次最多 123 个寄存器，合并后的请求也遵守此上限。`batchWriteLen` 只是合并阈值；小于单个合法 String 长度时独立发送，不拆分。只写 String 不受 `batchReadLen` 限制
+
+### 只写点位
+
+通过 `readWrite: "W"` 配置只写权限，`primaryTable` 仍按设备协议选择 `HOLDING_REGISTER` 或 `COIL`。例如：
+
+```json
+{
+  "name": "command",
+  "description": "控制命令",
+  "primaryTable": "HOLDING_REGISTER",
+  "startAddress": "100d",
+  "rawType": "Uint16",
+  "valueType": "int",
+  "readWrite": "W",
+  "bitLen": 0
+}
+```
+
+- 只写点位不作为自动采集和写后回读的目标，显式读取会返回权限错误；默认仍允许相邻可读点位的批量请求经过该地址，保持原有采集逻辑。
+- 连接下全部点位为只写时，连接正常保留，不创建采集任务；反向模式仍监听设备连接并执行配置的身份识别。
+- 只写保持寄存器不支持 `bitLen > 0`：按位写入需要先读取原值以保留其他位。此配置会在初始化时拒绝所属连接，并输出连接、设备和点位信息；请将 `bitLen` 设为 `0`，按设备协议写入完整寄存器值。
+- 如果设备的只写地址确实不能读取，在所属连接配置中设置 `"skipWriteOnlyInBatchRead": true`，驱动会在这些地址处拆组。启用时，如果可读点自身的多寄存器范围与只写区间重叠，会跳过该可读点并记录冲突点位错误，不截断其数据长度。
+- 若所有地址空洞都不允许跨读，可设置 `"maxReadGap": 0`；这个限制与 `skipWriteOnlyInBatchRead` 分别控制空洞大小和只写地址避让。
+
+例如，连接配置片段如下，允许跨越普通空洞，同时避开只写地址：
+
+```json
+{
+  "batchReadLen": 32,
+  "skipWriteOnlyInBatchRead": true
+}
+```
 
 ## 虚拟模式
 
@@ -487,7 +524,7 @@ graph TB
     subgraph 采集组构建
         D --> D1{相同采集周期?}
         D1 -->|是| D2{相同寄存器类型?}
-        D2 -->|是| D3{地址连续<br/>且不超过batchReadLen?}
+        D2 -->|是| D3{跨度和空洞符合限制<br/>且符合只写避让配置?}
         D3 -->|是| D4[合并为同一组]
         D3 -->|否| D5[创建新组]
         D2 -->|否| D5
@@ -528,7 +565,7 @@ graph TB
 
 1. **相同采集周期**：`duration` 相同的点位分为一组
 2. **相同寄存器类型**：`primaryTable` 相同的点位才能同组
-3. **地址连续**：地址区间不超过 `batchReadLen` 时合并为同一组
+3. **地址跨度**：默认允许跨未配置地址和只写点位地址，合并长度不超过有效 `batchReadLen`；可用 `maxReadGap` 限制中间空洞，设置 `skipWriteOnlyInBatchRead: true` 可在只写地址处拆组
 4. **超限拆分**：超过 `batchReadLen` 时拆分为新组
 
 示例：

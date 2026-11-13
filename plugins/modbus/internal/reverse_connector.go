@@ -738,6 +738,11 @@ func (rc *reverseConnector) addDevice(model config.DeviceModel, dev config.Devic
 
 	groupIndex := 0
 	groups := make([]*pointGroup, 0)
+	var barriers []*Point
+	if rc.config.SkipWriteOnlyInBatchRead {
+		// Reverse sessions are isolated by device ID, so barriers are local to this device.
+		barriers = writeOnlyReadBarriers(model.DevicePoints)
+	}
 
 	unitId, err := getUnitId(dev.Properties)
 	if err != nil {
@@ -753,6 +758,11 @@ func (rc *reverseConnector) addDevice(model config.DeviceModel, dev config.Devic
 			modbusLog().Error("error modbus reverse point config", zap.String("deviceId", dev.ID), zap.Any("point", point), zap.Error(err))
 			continue
 		}
+		if blocked := overlappingWriteOnlyPoint(uint32(ext.Address), uint32(ext.Address)+uint32(ext.Quantity), ext.RegisterType, barriers); blocked != nil {
+			modbusLog().Error("skip readable Modbus point overlapping write-only registers", zap.String("connectionKey", rc.config.ConnectionKey),
+				zap.String("deviceId", dev.ID), zap.String("pointName", point.Name()), zap.String("writeOnlyPoint", blocked.Name()))
+			continue
+		}
 		ext.DeviceId = dev.ID
 		duration, err := time.ParseDuration(ext.Duration)
 		if err != nil {
@@ -764,19 +774,11 @@ func (rc *reverseConnector) addDevice(model config.DeviceModel, dev config.Devic
 			if group.Duration != duration || group.RegisterType != ext.RegisterType {
 				continue
 			}
-			start := uint32(group.Address)
-			if start > uint32(ext.Address) {
-				start = uint32(ext.Address)
-			}
-			end := uint32(group.Address) + uint32(group.Quantity)
-			if end < uint32(ext.Address)+uint32(ext.Quantity) {
-				end = uint32(ext.Address) + uint32(ext.Quantity)
-			}
-			if end <= 65536 && end-start <= readGroupLimit(rc.config, ext.RegisterType) {
+			if start, quantity, merge := mergeReadWindow(group, ext, rc.config, barriers); merge {
 				group.Points = append(group.Points, ext)
 				ok = true
-				group.Address = uint16(start)
-				group.Quantity = uint16(end - start)
+				group.Address = start
+				group.Quantity = quantity
 				break
 			}
 		}
@@ -825,6 +827,15 @@ func isReverseConnectionClosed(err error) bool {
 }
 
 func (rc *reverseConnector) initCollectTask() (*crontab.Future, error) {
+	rc.mutex.RLock()
+	readGroups := 0
+	for _, groups := range rc.devicePointGroups {
+		readGroups += len(groups)
+	}
+	rc.mutex.RUnlock()
+	if readGroups == 0 {
+		return nil, nil
+	}
 	scanInterval, err := crontab.ParseDurationOrDefault(rc.config.ScanInterval, time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("invalid scanInterval: %w", err)

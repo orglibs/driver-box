@@ -56,6 +56,13 @@ func newConnector(p *Plugin, cf *ConnectionConfig) (*connector, error) {
 }
 
 func (c *connector) initCollectTask(conf *ConnectionConfig) (*crontab.Future, error) {
+	readGroups := 0
+	for _, device := range c.devices {
+		readGroups += len(device.pointGroup)
+	}
+	if readGroups == 0 {
+		return nil, nil
+	}
 	scanInterval, err := crontab.ParseDurationOrDefault(conf.ScanInterval, time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("invalid scanInterval: %w", err)
@@ -64,9 +71,8 @@ func (c *connector) initCollectTask(conf *ConnectionConfig) (*crontab.Future, er
 	//注册定时采集任务
 	return driverbox.AddFunc(scanInterval.String(), func() {
 		//遍历所有通讯设备
-		for unitID, device := range c.devices {
+		for _, device := range c.devices {
 			if len(device.pointGroup) == 0 {
-				driverbox.Log().Warn("device has none read point", zap.Uint8("unitID", unitID))
 				continue
 			}
 			//批量遍历通讯设备下的点位，并将结果关联至物模型设备
@@ -131,7 +137,34 @@ func (c *connector) initCollectTask(conf *ConnectionConfig) (*crontab.Future, er
 
 // 采集任务分组
 func (c *connector) createPointGroup(conf *ConnectionConfig, model config.DeviceModel, dev config.Device) {
-	groupIndex := 0
+	// Register the device even when every point is write-only.
+	device, err := c.createDevice(dev.Properties)
+	if err != nil {
+		driverbox.Log().Error("error modbus device config", zap.String("deviceId", dev.ID), zap.Error(err))
+		return
+	}
+	groupIndex := len(device.pointGroup)
+	var barriers []*Point
+	if conf.SkipWriteOnlyInBatchRead {
+		// Models sharing a physical slave must respect each other's write-only
+		// addresses, regardless of initialization order. Scan all configured models
+		// without adding the current model twice; standalone callers use the model.
+		if c.plugin != nil && len(c.plugin.config.DeviceModels) > 0 {
+			for _, otherModel := range c.plugin.config.DeviceModels {
+				for _, otherDev := range otherModel.Devices {
+					if otherDev.ConnectionKey != conf.ConnectionKey {
+						continue
+					}
+					if unitID, err := getUnitId(otherDev.Properties); err == nil && unitID == device.unitID {
+						barriers = append(barriers, writeOnlyReadBarriers(otherModel.DevicePoints)...)
+						break
+					}
+				}
+			}
+		} else {
+			barriers = writeOnlyReadBarriers(model.DevicePoints)
+		}
+	}
 	for _, point := range model.DevicePoints {
 		if point.ReadWrite() != config.ReadWrite_R && point.ReadWrite() != config.ReadWrite_RW {
 			continue
@@ -141,6 +174,11 @@ func (c *connector) createPointGroup(conf *ConnectionConfig, model config.Device
 			driverbox.Log().Error("error modbus point config", zap.String("deviceId", dev.ID), zap.Any("point", point), zap.Error(err))
 			continue
 		}
+		if blocked := overlappingWriteOnlyPoint(uint32(ext.Address), uint32(ext.Address)+uint32(ext.Quantity), ext.RegisterType, barriers); blocked != nil {
+			driverbox.Log().Error("skip readable Modbus point overlapping write-only registers", zap.String("connectionKey", conf.ConnectionKey),
+				zap.String("deviceId", dev.ID), zap.String("pointName", point.Name()), zap.String("writeOnlyPoint", blocked.Name()))
+			continue
+		}
 		ext.DeviceId = dev.ID
 		duration, err := time.ParseDuration(ext.Duration)
 		if err != nil {
@@ -148,11 +186,6 @@ func (c *connector) createPointGroup(conf *ConnectionConfig, model config.Device
 			duration = time.Second
 		}
 
-		device, err := c.createDevice(dev.Properties)
-		if err != nil {
-			driverbox.Log().Error("error modbus device config", zap.String("deviceId", dev.ID), zap.Any("config", point), zap.Error(err))
-			continue
-		}
 		ok := false
 		//同一寄存器地址可能通过位运算对应多个点位，也需要将该点加入group
 		for _, group := range device.pointGroup {
@@ -165,21 +198,11 @@ func (c *connector) createPointGroup(conf *ConnectionConfig, model config.Device
 				continue
 			}
 
-			//如果ext和group中的其他addres区间长度不超过maxLen，则添加到group中
-			start := uint32(group.Address)
-			if start > uint32(ext.Address) {
-				start = uint32(ext.Address)
-			}
-			end := uint32(group.Address) + uint32(group.Quantity)
-			if end < uint32(ext.Address)+uint32(ext.Quantity) {
-				end = uint32(ext.Address) + uint32(ext.Quantity)
-			}
-			//超过最大长度，拆成新的一组
-			if end <= 65536 && end-start <= readGroupLimit(conf, ext.RegisterType) {
+			if start, quantity, merge := mergeReadWindow(group, ext, conf, barriers); merge {
 				group.Points = append(group.Points, ext)
 				ok = true
-				group.Address = uint16(start)
-				group.Quantity = uint16(end - start)
+				group.Address = start
+				group.Quantity = quantity
 				break
 			}
 		}
@@ -661,6 +684,9 @@ func convToPointExtend(extends config.Point) (*Point, error) {
 		driverbox.Log().Error("error modbus config", zap.Any("config", extends), zap.Error(err))
 		return nil, err
 	}
+	if extend.RegisterType == HoldingRegister && extends.ReadWrite() == config.ReadWrite_W && extend.BitLen > 0 {
+		return nil, fmt.Errorf("write-only HOLDING_REGISTER cannot use bitLen > 0: bit writes require reading the original register; set bitLen=0 and write the complete register value")
+	}
 	//未设置，则默认每秒采集一次
 	if extend.Duration == "" {
 		extend.Duration = "1s"
@@ -710,6 +736,9 @@ func convToPointExtend(extends config.Point) (*Point, error) {
 
 func (c *connector) createDevice(properties map[string]string) (d *slaveDevice, err error) {
 	unitID, err := getUnitId(properties)
+	if err != nil {
+		return nil, err
+	}
 	d, ok := c.devices[unitID]
 	if ok {
 		return d, nil

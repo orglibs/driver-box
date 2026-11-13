@@ -61,15 +61,15 @@ func validateStringPoint(point config.Point) (uint16, error) {
 	if point["valueType"] != "string" {
 		return 0, fmt.Errorf("String valueType must be string")
 	}
-	access, _ := point["readWrite"].(string)
-	if access != "R" && access != "W" && access != "RW" {
+	access := point.ReadWrite()
+	if access != config.ReadWrite_R && access != config.ReadWrite_W && access != config.ReadWrite_RW {
 		return 0, fmt.Errorf("String readWrite must be R, W or RW")
 	}
 	table, _ := point["primaryTable"].(string)
 	if table != string(HoldingRegister) && table != string(InputRegister) {
 		return 0, fmt.Errorf("String requires HOLDING_REGISTER or INPUT_REGISTER")
 	}
-	if access != "R" {
+	if access != config.ReadWrite_R {
 		if table == string(InputRegister) {
 			return 0, fmt.Errorf("INPUT_REGISTER String must be read-only")
 		}
@@ -100,7 +100,8 @@ func readGroupLimit(conf *ConnectionConfig, table primaryTable) uint32 {
 	return limit
 }
 
-// Validate bound String and offset points before constructing clients, listeners or tasks.
+// Validate access modes and bound String, offset and write-only points before
+// constructing clients, listeners or tasks.
 // Initialize has no error result: reject only this connection and log each context.
 func validateConnectionPoints(conf *ConnectionConfig, models []config.DeviceModel) error {
 	var firstErr error
@@ -110,13 +111,19 @@ func validateConnectionPoints(conf *ConnectionConfig, models []config.DeviceMode
 				continue
 			}
 			for _, point := range model.DevicePoints {
+				access := point.ReadWrite()
 				_, hasOffset := point["offset"]
-				if !isStringPoint(point) && !hasOffset {
+				var err error
+				if access != config.ReadWrite_R && access != config.ReadWrite_W && access != config.ReadWrite_RW {
+					err = fmt.Errorf("readWrite must be R, W or RW")
+				} else if !isStringPoint(point) && !hasOffset && access != config.ReadWrite_W {
 					continue
-				}
-				ext, err := convToPointExtend(point)
-				if err == nil && isStringPoint(point) && point["readWrite"] != "W" && uint32(ext.Quantity) > readGroupLimit(conf, ext.RegisterType) {
-					err = fmt.Errorf("String quantity %d exceeds effective batchReadLen %d; increase batchReadLen", ext.Quantity, readGroupLimit(conf, ext.RegisterType))
+				} else {
+					var ext *Point
+					ext, err = convToPointExtend(point)
+					if err == nil && isStringPoint(point) && access != config.ReadWrite_W && uint32(ext.Quantity) > readGroupLimit(conf, ext.RegisterType) {
+						err = fmt.Errorf("String quantity %d exceeds effective batchReadLen %d; increase batchReadLen", ext.Quantity, readGroupLimit(conf, ext.RegisterType))
+					}
 				}
 				if err != nil {
 					context := fmt.Errorf("connectionKey=%s model=%s deviceId=%s pointName=%v: %w", conf.ConnectionKey, model.Name, device.ID, point["name"], err)

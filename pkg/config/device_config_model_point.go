@@ -49,12 +49,16 @@ func (pm Point) Name() string {
 
 // ReadWrite 获取点位读写模式
 // 返回点位的读写权限设置，如只读、只写或读写
+// 支持字符串和 ReadWrite 枚举；字段缺失或类型非法时返回空值，由配置校验报告错误。
 func (pm Point) ReadWrite() ReadWrite {
-	valueType, ok := pm.FieldValue("readWrite")
-	if !ok {
+	switch value := pm["readWrite"].(type) {
+	case string:
+		return ReadWrite(value)
+	case ReadWrite:
+		return value
+	default:
 		return ""
 	}
-	return ReadWrite(valueType.(string))
 }
 
 // FieldValue 根据键名获取点位字段值
