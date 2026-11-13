@@ -140,8 +140,10 @@ func tryReadNewValues(deviceId string, points []plugin.PointData) {
 					logger.Logger.Warn("point write success, but expect point value maybe expired", zap.String("deviceId", deviceId), zap.String("point", p.PointName), zap.Any("expect", p.Value), zap.Any("value", point.Value))
 					continue
 				}
-				if fmt.Sprint(p.Value) != fmt.Sprint(point.Value) {
+				if !readbackValuesEqual(p.Value, point.Value) {
 					newReadPoints = append(newReadPoints, p)
+					logger.Logger.Debug("point write readback not confirmed", zap.String("deviceId", deviceId), zap.String("point", p.PointName), zap.Any("expect", p.Value), zap.Any("value", point.Value))
+					continue
 				}
 				logger.Logger.Info("point write success, read new value", zap.String("deviceId", deviceId), zap.String("point", p.PointName), zap.Any("expect", p.Value), zap.Any("value", point.Value))
 			}
