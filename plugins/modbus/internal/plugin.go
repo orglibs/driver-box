@@ -29,11 +29,27 @@ type Plugin struct {
 	config   config.DeviceConfig
 }
 
+// modbusClient keeps external I/O replaceable without replacing connector policy.
+type modbusClient interface {
+	Open() error
+	Close() error
+	SetUnitId(uint8) error
+	ReadCoils(uint16, uint16) ([]bool, error)
+	ReadDiscreteInputs(uint16, uint16) ([]bool, error)
+	ReadRegisters(uint16, uint16, modbus.RegType) ([]uint16, error)
+	WriteCoil(uint16, bool) error
+	WriteCoils(uint16, []bool) error
+	WriteRegister(uint16, uint16) error
+	WriteRegisters(uint16, []uint16) error
+}
+
+var _ modbusClient = (*modbus.ModbusClient)(nil)
+
 // connector 连接器
 type connector struct {
 	config *ConnectionConfig
 	plugin *Plugin
-	client *modbus.ModbusClient
+	client modbusClient
 	//串口保持打开状态
 	keepAlive    bool
 	latestIoTime time.Time // 最近一次执行IO的时间
@@ -45,7 +61,7 @@ type connector struct {
 	//当前连接的定时扫描任务
 	collectTask *crontab.Future
 	//当前连接是否已关闭
-	close bool
+	close atomic.Bool
 	//是否虚拟链接
 	virtual bool
 

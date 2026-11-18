@@ -618,6 +618,14 @@ ERROR 摘要包含连接、从站、寄存器类型、地址、长度、点位�
 
 `totalFailures` 是本轮故障的实际失败请求总数，`newFailures` 是上次摘要后新增的失败数，恢复日志的 `unreportedFailures` 是尚未汇总的失败数。`skippedGroupChecks` 是因写入跳过的分组检查次数，同一组跨扫描重复计数；`deferredGroups` 是尚未重新开始读取的组数，`longestDeferral` 是其中最长等待时间。一个组恢复不会清除其他组的故障或避让状态。
 
+### 连接复用和请求错误日志
+
+普通连接（`tcp`、`rtu`、`rtuovertcp`）在成功请求后保持打开；非法地址等已识别的 Modbus 异常响应以及本地参数错误保留连接，本次请求仍返回原错误。EOF、网络错误、超时、CRC/短帧、站号或事务号错误、协议错误及未知错误关闭连接，由后续请求重新建立，不增加透明重发。`reverse_tcp` 保持原有连接策略。
+
+打开失败日志包含 `connectionKey`、`mode`、`connectionAddress` 和 `error`；请求失败还包含 `connectionAction`（`keep` 或 `close`）、`operation`、`unitID`、`registerType`、`address` 和 `quantity`。保留连接时输出 `modbus request failed, connection kept`，关闭连接时输出 `modbus client error, will close it`，均为 ERROR；这些底层请求日志独立于上方周期采集的 30 秒摘要。
+
+`address` 为实际传给客户端的零基地址；`quantity` 为寄存器数或线圈/离散输入位数。日志不输出完整连接配置。关闭连接器时等待当前请求完成并释放连接，关闭后拒绝重新打开。
+
 ## 默认值
 
 以下参数未配置时使用默认值：

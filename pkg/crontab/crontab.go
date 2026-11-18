@@ -3,6 +3,7 @@ package crontab
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -50,7 +51,7 @@ type Future struct {
 	ticker *time.Ticker
 	cronId cron.EntryID
 	//是否启用
-	enable bool
+	enable atomic.Bool
 }
 type crontab struct {
 	futures []*Future
@@ -72,8 +73,8 @@ func (c *crontab) AddFunc(s string, f func()) (*Future, error) {
 		function := &Future{
 			function: f,
 			ticker:   time.NewTicker(d),
-			enable:   true,
 		}
+		function.enable.Store(true)
 		c.futures = append(c.futures, function)
 		go function.run()
 		return function, nil
@@ -86,15 +87,15 @@ func (c *crontab) AddFunc(s string, f func()) (*Future, error) {
 	function := &Future{
 		function: f,
 		cronId:   cronId,
-		enable:   true,
 	}
+	function.enable.Store(true)
 	c.futures = append(c.futures, function)
 	return function, nil
 }
 
 func (f *Future) run() {
 	for range f.ticker.C {
-		if !f.enable {
+		if !f.enable.Load() {
 			f.ticker.Stop()
 			break
 		}
@@ -102,10 +103,9 @@ func (f *Future) run() {
 	}
 }
 func (f *Future) Disable() {
-	if !f.enable {
+	if !f.enable.Swap(false) {
 		return
 	}
-	f.enable = false
 	if f.ticker != nil {
 		f.ticker.Reset(1)
 	}

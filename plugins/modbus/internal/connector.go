@@ -83,7 +83,7 @@ func (c *connector) collectOnce(conf *ConnectionConfig) {
 		}
 		//批量遍历通讯设备下的点位，并将结果关联至物模型设备
 		for i, group := range device.pointGroup {
-			if c.close {
+			if c.close.Load() {
 				driverbox.Log().Warn("modbus connection is closed, ignore collect task!", zap.String("key", c.config.ConnectionKey))
 				return
 			}
@@ -286,12 +286,15 @@ func (c *connector) Release() (err error) {
 }
 
 func (c *connector) Close() {
-	c.close = true
+	c.close.Store(true)
 	if c.collectTask != nil {
 		c.collectTask.Disable()
 	}
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	if c.keepAlive {
 		_ = c.client.Close()
+		c.keepAlive = false
 	}
 }
 
@@ -568,7 +571,14 @@ func (c *connector) read(slaveId uint8, registerType string, address, quantity u
 	if err != nil {
 		return nil, err
 	}
-	defer func() { c.closeModbusClient(err) }()
+	defer func() {
+		c.closeModbusClient(err,
+			zap.String("operation", "read"),
+			zap.Uint8("unitID", slaveId),
+			zap.String("registerType", strings.ToUpper(registerType)),
+			zap.Uint16("address", address),
+			zap.Uint16("quantity", quantity))
+	}()
 	if err = c.client.SetUnitId(slaveId); err != nil {
 		return nil, err
 	}
@@ -598,6 +608,10 @@ func (c *connector) read(slaveId uint8, registerType string, address, quantity u
 
 func (c *connector) openModbusClient() error {
 	c.mutex.Lock()
+	if c.close.Load() {
+		c.mutex.Unlock()
+		return errors.New("modbus connector is closed")
+	}
 	//modbus连接已打开
 	if c.keepAlive {
 		return nil
@@ -605,25 +619,59 @@ func (c *connector) openModbusClient() error {
 	err := c.client.Open()
 	if err != nil {
 		c.mutex.Unlock()
-		driverbox.Log().Error("open modbus client error", zap.Any("modbus", c.config), zap.Error(err))
+		driverbox.Log().Error("open modbus client error",
+			zap.String("connectionKey", c.config.ConnectionKey),
+			zap.String("mode", c.config.Mode),
+			zap.String("connectionAddress", c.config.Address), zap.Error(err))
 	} else {
 		c.keepAlive = true
 	}
 	return err
 }
 
-func (c *connector) closeModbusClient(e error) {
+func (c *connector) closeModbusClient(e error, requestFields ...zap.Field) {
 	defer func() {
 		c.mutex.Unlock()
 	}()
+	closeClient := shouldCloseModbusClient(e)
 	if e != nil {
-		driverbox.Log().Error("modbus client error, will close it", zap.Error(e))
+		message, action := "modbus request failed, connection kept", "keep"
+		if closeClient {
+			message, action = "modbus client error, will close it", "close"
+		}
+		fields := []zap.Field{
+			zap.String("connectionKey", c.config.ConnectionKey),
+			zap.String("mode", c.config.Mode),
+			zap.String("connectionAddress", c.config.Address),
+			zap.Error(e),
+			zap.String("connectionAction", action),
+		}
+		fields = append(fields, requestFields...)
+		driverbox.Log().Error(message, fields...)
 	}
-	//RTU 模式下，连接不关闭
-	if c.config.Mode != "rtu" || e != nil {
+	if closeClient {
 		c.keepAlive = false
 		_ = c.client.Close()
 	}
+}
+
+// A valid exception response rejects this request without invalidating the link.
+// Unknown, transport and malformed-response errors conservatively discard it.
+func shouldCloseModbusClient(err error) bool {
+	if err == nil {
+		return false
+	}
+	for _, reusable := range []error{
+		modbus.ErrIllegalFunction, modbus.ErrIllegalDataAddress, modbus.ErrIllegalDataValue,
+		modbus.ErrServerDeviceFailure, modbus.ErrAcknowledge, modbus.ErrServerDeviceBusy,
+		modbus.ErrMemoryParityError, modbus.ErrGWPathUnavailable, modbus.ErrGWTargetFailedToRespond,
+		modbus.ErrUnexpectedParameters,
+	} {
+		if errors.Is(err, reusable) {
+			return false
+		}
+	}
+	return true
 }
 
 func boolSliceToUint16(arr []bool) []uint16 {
@@ -662,7 +710,14 @@ func (c *connector) write(wv *writeValue) (err error) {
 	if err != nil {
 		return err
 	}
-	defer c.closeModbusClient(err)
+	defer func() {
+		c.closeModbusClient(err,
+			zap.String("operation", "write"),
+			zap.Uint8("unitID", slaveID),
+			zap.String("registerType", string(registerType)),
+			zap.Uint16("address", address),
+			zap.Int("quantity", len(values)))
+	}()
 	err = c.client.SetUnitId(slaveID)
 	if err != nil {
 		return
