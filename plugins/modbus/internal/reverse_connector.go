@@ -1082,6 +1082,13 @@ func (rc *reverseConnector) sendReadCommand(session *reverseSession, deviceId st
 	return nil
 }
 
+// reverseReadRequest owns its groups; it must not modify the periodic collector's
+// LatestTime, TimeOutCount or Points while a write readback is in progress.
+type reverseReadRequest struct {
+	deviceID string
+	groups   []*pointGroup
+}
+
 func (rc *reverseConnector) Send(data interface{}) error {
 	cmd, ok := data.(command)
 	if !ok {
@@ -1089,6 +1096,26 @@ func (rc *reverseConnector) Send(data interface{}) error {
 	}
 
 	switch cmd.Mode {
+	case plugin.ReadMode:
+		request, ok := cmd.Value.(reverseReadRequest)
+		if !ok {
+			return errors.New("invalid reverse read payload")
+		}
+		if len(request.groups) == 0 {
+			return nil
+		}
+		session, ok := rc.getSession(request.deviceID)
+		if !ok {
+			return fmt.Errorf("device [%s] is not connected", request.deviceID)
+		}
+		for _, group := range request.groups {
+			// Use the same interval lock, decoding and Export/Shadow path as
+			// periodic reads. Explicit readback must not be skipped by write avoidance.
+			if err := rc.sendReadCommand(session, request.deviceID, command{Mode: plugin.ReadMode, Value: group}); err != nil {
+				return err
+			}
+		}
+		return nil
 	case plugin.WriteMode:
 		values := cmd.Value.([]*writeValue)
 		for _, wv := range values {
@@ -1147,6 +1174,9 @@ func (rc *reverseConnector) Decode(raw interface{}) (res []plugin.DeviceData, er
 }
 
 func (rc *reverseConnector) Encode(deviceId string, mode plugin.EncodeMode, values ...plugin.PointData) (interface{}, error) {
+	if mode == plugin.ReadMode {
+		return rc.encodeRead(deviceId, values)
+	}
 	if mode == plugin.WriteMode {
 		writeValues := make([]*writeValue, 0)
 		codec := &connector{}
@@ -1169,7 +1199,42 @@ func (rc *reverseConnector) Encode(deviceId string, mode plugin.EncodeMode, valu
 			Value: mergeReverseWriteValues(writeValues, rc.config.BatchWriteLen),
 		}, nil
 	}
-	return nil, errors.New("reverse connector encode only supports write mode")
+	return nil, fmt.Errorf("unsupported reverse connector encode mode: %s", mode)
+}
+
+func (rc *reverseConnector) encodeRead(deviceID string, values []plugin.PointData) (interface{}, error) {
+	wanted := make(map[string]bool, len(values))
+	for _, value := range values {
+		wanted[value.PointName] = false
+	}
+	request := reverseReadRequest{deviceID: deviceID}
+	rc.mutex.RLock()
+	defer rc.mutex.RUnlock()
+	// These groups already enforce device point selection, read permissions,
+	// register boundaries and write-only barriers. Keep their safe read windows,
+	// but decode/export only the requested points, once per group.
+	for _, source := range rc.devicePointGroups[deviceID] {
+		var points []*Point
+		for _, point := range source.Points {
+			if _, ok := wanted[point.Name()]; ok {
+				points = append(points, point)
+				wanted[point.Name()] = true
+			}
+		}
+		if len(points) > 0 {
+			request.groups = append(request.groups, &pointGroup{
+				UnitID: source.UnitID, RegisterType: source.RegisterType,
+				Address: source.Address, Quantity: source.Quantity, Points: points,
+			})
+		}
+	}
+	// Validate the whole request before Send can issue any I/O.
+	for _, value := range values {
+		if !wanted[value.PointName] {
+			return nil, fmt.Errorf("point [%s] is not readable for device [%s]", value.PointName, deviceID)
+		}
+	}
+	return command{Mode: plugin.ReadMode, Value: request}, nil
 }
 
 func mergeReverseWriteValues(values []*writeValue, batchWriteLen uint16) []*writeValue {
